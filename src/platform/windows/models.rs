@@ -9,7 +9,7 @@ use windows::{
                 VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
             },
             WindowsAndMessaging::{
-                EnumWindows, FindWindowExW, FindWindowW, GetCaretPos, SMTO_NORMAL,
+                EnumWindows, FindWindowExW, FindWindowW, GetCaretPos, GetCursorPos, SMTO_NORMAL,
                 SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageTimeoutW, SystemParametersInfoW,
             },
@@ -33,7 +33,7 @@ pub struct WindowsPlatform {
     // g_engineWindowHandle  : handle to the engine window we inject
     pub progman_window_handle: Option<HWND>,
     pub workerw_window_handle: Option<HWND>,
-    pub shell_view_whidow_handle: Option<HWND>,
+    pub shell_view_window_handle: Option<HWND>,
     pub engine_window_handle: Option<HWND>,
 
     // Current monitor in desktop coordinates
@@ -60,7 +60,8 @@ impl WindowsPlatform {
         }
         0
     }
-    pub fn initialize(&mut self) -> Result<(), WinErr> {
+    pub fn initialize() -> Result<Self, WinErr> {
+        let mut windows_platform = Self::default();
         unsafe {
             // Set the process DPI awareness to get physical pixel coordinates.
             // This must be done before any windows are created.
@@ -72,12 +73,12 @@ impl WindowsPlatform {
             // Create global variables object at initialization then pass it as return type
 
             // Locate the Progman window (the desktop window)
-            self.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
+            windows_platform.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
 
             // Send message 0x052C to Progman to force creation of a WorkerW window
             let mut result = 0;
             SendMessageTimeoutW(
-                self.progman_window_handle.unwrap(),
+                windows_platform.progman_window_handle.unwrap(),
                 0x052c,
                 WPARAM(0),
                 LPARAM(0),
@@ -87,25 +88,29 @@ impl WindowsPlatform {
             );
 
             // Try to locate the Shell view (desktop icons) and WorkerW child directly under Progman
-            self.shell_view_whidow_handle = FindWindowExW(
-                self.progman_window_handle,
+            windows_platform.shell_view_window_handle = FindWindowExW(
+                windows_platform.progman_window_handle,
                 None,
                 w!("SHELLDLL_DefView"),
                 None,
             )
             .ok();
 
-            self.workerw_window_handle = Some(
-                FindWindowExW(self.progman_window_handle, None, w!("WorkerW"), None).map_err(
-                    |e| {
-                        // Fallback for pre-24H2 builds where the WorkerW is a sibling window
-                        self.is_pre_24h2 = true;
-                        let _ = EnumWindows(Some(enum_windows_proc), LPARAM(0));
-                        e
-                    },
-                )?,
+            windows_platform.workerw_window_handle = Some(
+                FindWindowExW(
+                    windows_platform.progman_window_handle,
+                    None,
+                    w!("WorkerW"),
+                    None,
+                )
+                .map_err(|e| {
+                    // Fallback for pre-24H2 builds where the WorkerW is a sibling window
+                    windows_platform.is_pre_24h2 = true;
+                    let _ = EnumWindows(Some(enum_windows_proc), LPARAM(0));
+                    e
+                })?,
             );
-            Ok(())
+            Ok(windows_platform)
         }
     }
 
@@ -147,11 +152,11 @@ impl WindowsPlatform {
         Vector2Platform { x: 0_f32, y: 0_f32 }
     }
 
-    pub fn supports_dynamuc_wallpaper() -> bool {
+    pub fn supports_dynamyc_wallpaper() -> bool {
         true
     }
 
-    pub fn supports_multi_monito() -> bool {
+    pub fn supports_multi_monitor() -> bool {
         true
     }
     pub fn is_mouse_button_pressed(&self, button: i32) -> bool {
@@ -162,7 +167,7 @@ impl WindowsPlatform {
         self.current_mouse_state[button] && !self.previous_mouse_state[button]
     }
 
-    pub fn is_mouse_button_donw(&self, button: i32) -> bool {
+    pub fn is_mouse_button_down(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
         }
@@ -178,7 +183,7 @@ impl WindowsPlatform {
     }
 
     pub fn is_mouse_button_up(&self, button: i32) -> bool {
-        if button < 0 && button >= 5 {
+        if button < 0 || button >= 5 {
             return false;
         }
         !self.current_mouse_state[button as usize]
@@ -195,7 +200,7 @@ impl WindowsPlatform {
 
     fn get_relative_cursor_pos(&self, p: &mut POINT) -> bool {
         unsafe {
-            if GetCaretPos(p).is_err() {
+            if GetCursorPos(p).is_err() {
                 return false;
             }
 
@@ -236,7 +241,7 @@ impl WindowsPlatform {
 
             self.progman_window_handle = None;
             self.workerw_window_handle = None;
-            self.shell_view_whidow_handle = None;
+            self.shell_view_window_handle = None;
             self.engine_window_handle = None;
         }
     }

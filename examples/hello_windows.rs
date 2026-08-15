@@ -7,7 +7,7 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-            DispatchMessageW, GetMessageW, HMENU, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage,
+            DispatchMessageW, GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage,
             RegisterClassW, SW_SHOW, ShowWindow, TranslateMessage, WM_DESTROY, WNDCLASSW,
             WS_OVERLAPPEDWINDOW,
         },
@@ -15,7 +15,7 @@ use windows::{
     core::w,
 };
 
-use lumin_wallpaper_rs::{configure_wallpaper_window, enumerate_monitors};
+use lumin_wallpaper_rs::configure_wallpaper_window;
 
 unsafe extern "system" fn window_proc(
     hwnd: HWND,

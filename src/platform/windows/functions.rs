@@ -28,104 +28,51 @@ use windows::{
 
 use crate::platform::windows::{
     models::{DesktopHandle, FullscrennOcclusionData, MonitorInfo, WindowsPlatform},
-    procs::{enum_windows_proc, fullscreen_window_enum_proc},
+    procs::fullscreen_window_enum_proc,
 };
 
-pub fn initialize() -> Result<WindowsPlatform, WinErr> {
-    unsafe {
-        // Set the process DPI awareness to get physical pixel coordinates.
-        // This must be done before any windows are created.
-        let dpi_awarenexx_result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-        if dpi_awarenexx_result.is_err() {
-            // Continue if needed, but coordinate values may be scaled.
-        }
-
-        // Create global variables object at initialization then pass it as return type
-        let mut global_variables = WindowsPlatform::default();
-
-        // Locate the Progman window (the desktop window)
-        global_variables.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
-
-        // Send message 0x052C to Progman to force creation of a WorkerW window
-        let mut result = 0;
-        SendMessageTimeoutW(
-            global_variables.progman_window_handle.unwrap(),
-            0x052c,
-            WPARAM(0),
-            LPARAM(0),
-            SMTO_NORMAL,
-            1000,
-            Some(&mut result),
-        );
-
-        // Try to locate the Shell view (desktop icons) and WorkerW child directly under Progman
-        global_variables.shell_view_whidow_handle = FindWindowExW(
-            global_variables.progman_window_handle,
-            None,
-            w!("SHELLDLL_DefView"),
-            None,
-        )
-        .ok();
-
-        global_variables.workerw_window_handle = Some(
-            FindWindowExW(
-                global_variables.progman_window_handle,
-                None,
-                w!("WorkerW"),
-                None,
-            )
-            .map_err(|e| {
-                // Fallback for pre-24H2 builds where the WorkerW is a sibling window
-                global_variables.is_pre_24h2 = true;
-                let _ = EnumWindows(Some(enum_windows_proc), LPARAM(0));
-                e
-            })?,
-        );
-        Ok(global_variables)
-    }
-}
-
 pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut WindowsPlatform) {
-    g.engine_window_handle = Some(hwnd);
+    let progman = match g.progman_window_handle {
+        Some(hwnd) => hwnd,
+        None => return,
+    };
 
-    if g.engine_window_handle.is_none() || g.progman_window_handle.is_none() {
-        return;
-    }
+    g.engine_window_handle = Some(hwnd);
 
     if g.is_pre_24h2 {
         // Reparent the window to the custom WorkerW window.
         // This attaches the window as a child of your WorkerW,
         // which should place it behind desktop icons if your WorkerW is set up that way.
         unsafe {
-            let _ = SetParent(g.engine_window_handle.unwrap(), g.workerw_window_handle);
+            let _ = SetParent(hwnd, g.workerw_window_handle);
 
             // Adjust window styles so that it behaves like a wallpaper.
             // For example, you may remove the title bar or border:
-            let mut style = GetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_STYLE);
+            let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove common overlapped window styles.
             style |= WS_CHILD.0 as isize; // Make it a child window.
-            SetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_STYLE, style);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style);
         }
     } else {
         unsafe {
             // Prepare the engine window to be a layered child of Progman
-            let mut style = GetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_STYLE);
+            let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove decorations
             style |= WS_CHILD.0 as isize; // Child style required for SetParent
-            SetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_STYLE, style);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style);
 
-            let mut ex_style = GetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_EXSTYLE);
+            let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             ex_style |= WS_EX_LAYERED.0 as isize; // Make it a layered window for 24h2
-            SetWindowLongPtrW(g.engine_window_handle.unwrap(), GWL_EXSTYLE, ex_style);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
 
             // Reparent the engine window directly to Progman
-            let _ = SetParent(g.engine_window_handle.unwrap(), g.progman_window_handle);
+            let _ = SetParent(hwnd, g.progman_window_handle);
 
             // Ensure correct Z-order: below icons but above the system wallpaper
-            if g.shell_view_whidow_handle.is_some() {
+            if g.shell_view_window_handle.is_some() {
                 let _ = SetWindowPos(
-                    g.engine_window_handle.unwrap(),
-                    g.shell_view_whidow_handle,
+                    hwnd,
+                    g.shell_view_window_handle,
                     0,
                     0,
                     0,
@@ -154,7 +101,7 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Win
         // Resize/reposition the engine window to match its new parent.
         // g_progmanWindowHandle spans the entire virtual desktop in modern builds
         let _ = SetWindowPos(
-            g.engine_window_handle.unwrap(),
+            hwnd,
             None,
             monitor.x,
             monitor.y,
