@@ -9,8 +9,9 @@ use windows::{
                 VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
             },
             WindowsAndMessaging::{
-                EnumWindows, FindWindowExW, FindWindowW, GetCursorPos, SMTO_NORMAL,
-                SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
+                EnumWindows, FindWindowExW, FindWindowW, GetCursorPos, GetSystemMetrics,
+                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SMTO_NORMAL, SPI_GETDESKWALLPAPER,
+                SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageTimeoutW, SystemParametersInfoW,
             },
         },
@@ -24,7 +25,7 @@ use crate::platform::windows::procs::{enum_windows_proc, monitor_enum_proc};
 
 // To avoid using static global variables we use this structure to store them
 // and pass it to fucntions as a refrence
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct WindowsPlatform {
     // Global variables to hold handles within the desktop hierarchy
     // g_progmanWindowHandle : top level Program Manager window
@@ -65,8 +66,8 @@ impl WindowsPlatform {
         unsafe {
             // Set the process DPI awareness to get physical pixel coordinates.
             // This must be done before any windows are created.
-            let dpi_awarenexx_result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-            if dpi_awarenexx_result.is_err() {
+            let dpi_awareness_result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+            if dpi_awareness_result.is_err() {
                 // Continue if needed, but coordinate values may be scaled.
             }
 
@@ -106,11 +107,30 @@ impl WindowsPlatform {
                 .map_err(|e| {
                     // Fallback for pre-24H2 builds where the WorkerW is a sibling window
                     windows_platform.is_pre_24h2 = true;
-                    let _ = EnumWindows(Some(enum_windows_proc), LPARAM(0));
+                    let lparam = LPARAM(&mut windows_platform as *mut WindowsPlatform as isize);
+                    let _ = EnumWindows(Some(enum_windows_proc), lparam);
                     e
                 })?,
             );
+
             Ok(windows_platform)
+        }
+    }
+
+    pub fn get_wallpaper_target(&mut self, monitor_index: i32) -> MonitorInfo {
+        let monitors = self.enumerate_monitors();
+
+        if monitor_index < 0 || monitor_index as usize >= monitors.len() {
+            let mut info = MonitorInfo::default();
+            info.x = 0;
+            info.y = 0;
+            unsafe {
+                info.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                info.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            }
+            info
+        } else {
+            monitors[monitor_index as usize].clone()
         }
     }
 
@@ -152,7 +172,7 @@ impl WindowsPlatform {
         Vector2Platform { x: 0_f32, y: 0_f32 }
     }
 
-    pub fn supports_dynamyc_wallpaper() -> bool {
+    pub fn supports_dynamic_wallpaper() -> bool {
         true
     }
 
@@ -280,12 +300,15 @@ pub struct MonitorInfo {
     pub width: i32,  // Monitor width in pixels
     pub height: i32, // Monitor height in pixels
 
+    pub work_x: i32, // Work area top-left X
+    pub work_y: i32, // Work area top-left Y
+
     pub work_width: i32,  // Work area width
     pub work_height: i32, // Work area height
 }
 
 #[derive(Debug, Default)]
-pub struct FullscrennOcclusionData {
+pub struct FullscreennOcclusionData {
     pub monitor: MonitorInfo,
     pub occluded_rects: Vec<RECT>,
 }

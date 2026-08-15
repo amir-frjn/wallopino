@@ -23,7 +23,7 @@ use windows::{
 };
 
 use crate::platform::windows::{
-    models::{DesktopHandle, FullscrennOcclusionData, MonitorInfo, WindowsPlatform},
+    models::{DesktopHandle, FullscreennOcclusionData, MonitorInfo, WindowsPlatform},
     procs::fullscreen_window_enum_proc,
 };
 
@@ -115,23 +115,6 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Win
     }
 }
 
-pub fn get_wallpaper_target(g: &mut WindowsPlatform, monitor_index: i32) -> MonitorInfo {
-    let monitors = g.enumerate_monitors();
-
-    if monitor_index < 0 || monitor_index as usize >= monitors.len() {
-        let mut info = MonitorInfo::default();
-        info.x = 0;
-        info.y = 0;
-        unsafe {
-            info.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-            info.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        }
-        info
-    } else {
-        monitors[monitor_index as usize].clone()
-    }
-}
-
 pub fn is_desktop_locked() -> bool {
     if is_secure_desktop() {
         return true;
@@ -179,9 +162,9 @@ pub fn is_monitor_occluded(
     threshold: f64,
     global_variable: &mut WindowsPlatform,
 ) -> bool {
-    let mut occlusion_data = FullscrennOcclusionData::default();
+    let mut occlusion_data = FullscreennOcclusionData::default();
     let wrapped = &mut (global_variable, &mut occlusion_data)
-        as *mut (&mut WindowsPlatform, &mut FullscrennOcclusionData) as isize;
+        as *mut (&mut WindowsPlatform, &mut FullscreennOcclusionData) as isize;
     let lparam = LPARAM(wrapped);
 
     let _ = unsafe { EnumWindows(Some(fullscreen_window_enum_proc), lparam) };
