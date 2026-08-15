@@ -13,7 +13,7 @@ use windows::{
 
 use crate::{
     is_invisible_win10_background_app_window,
-    platform::windows::models::{FullscrennOcclusionData, GlobalVariables, MonitorInfo},
+    platform::windows::models::{FullscrennOcclusionData, MonitorInfo, WindowsPlatform},
 };
 
 fn class_name(hwnd: HWND) -> String {
@@ -24,7 +24,7 @@ fn class_name(hwnd: HWND) -> String {
 
 pub extern "system" fn fullscreen_window_enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let wrapped =
-        unsafe { &mut *(lparam.0 as *mut (&mut GlobalVariables, &mut FullscrennOcclusionData)) };
+        unsafe { &mut *(lparam.0 as *mut (&mut WindowsPlatform, &mut FullscrennOcclusionData)) };
     let (g, occlusion_data) = wrapped;
 
     if Some(hwnd) == g.engine_window_handle || Some(hwnd) == g.workerw_window_handle {
@@ -91,7 +91,7 @@ pub extern "system" fn fullscreen_window_enum_proc(hwnd: HWND, lparam: LPARAM) -
 }
 
 // Callback function for EnumWindows to locate the proper WorkerW window
-// To avoid using global variable we pass them as a GlobalVariables via lparam
+// To avoid using global variable we pass them as a WindowsPlatform via lparam
 pub extern "system" fn enum_windows_proc(window_handle: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
         // Look for a child window named "SHELLDLL_DefView" in each top-level window.
@@ -99,7 +99,7 @@ pub extern "system" fn enum_windows_proc(window_handle: HWND, lparam: LPARAM) ->
             FindWindowExW(None, Some(window_handle), w!("SHELLDLL_DefView"), None);
         if shell_view_window.is_ok() {
             // If found, get the WorkerW window that is a sibling of the found window.
-            let g = { &mut *(lparam.0 as *mut GlobalVariables) };
+            let g = { &mut *(lparam.0 as *mut WindowsPlatform) };
             g.workerw_window_handle =
                 { FindWindowExW(None, Some(window_handle), w!("WorkerW"), None) }.ok();
             return FALSE;

@@ -19,9 +19,6 @@ use windows::{
         },
         UI::{
             HiDpi::{PROCESS_PER_MONITOR_DPI_AWARE, SetProcessDpiAwareness},
-            Input::KeyboardAndMouse::{
-                VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
-            },
             Shell::PathFindFileNameW,
             WindowsAndMessaging::*,
         },
@@ -30,13 +27,11 @@ use windows::{
 };
 
 use crate::platform::windows::{
-    models::{
-        DesktopHandle, FullscrennOcclusionData, GlobalVariables, MonitorInfo, Vector2Platform,
-    },
-    procs::{enum_windows_proc, fullscreen_window_enum_proc, monitor_enum_proc},
+    models::{DesktopHandle, FullscrennOcclusionData, MonitorInfo, WindowsPlatform},
+    procs::{enum_windows_proc, fullscreen_window_enum_proc},
 };
 
-pub fn initialize() -> Result<GlobalVariables, WinErr> {
+pub fn initialize() -> Result<WindowsPlatform, WinErr> {
     unsafe {
         // Set the process DPI awareness to get physical pixel coordinates.
         // This must be done before any windows are created.
@@ -46,7 +41,7 @@ pub fn initialize() -> Result<GlobalVariables, WinErr> {
         }
 
         // Create global variables object at initialization then pass it as return type
-        let mut global_variables = GlobalVariables::default();
+        let mut global_variables = WindowsPlatform::default();
 
         // Locate the Progman window (the desktop window)
         global_variables.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
@@ -90,62 +85,7 @@ pub fn initialize() -> Result<GlobalVariables, WinErr> {
     }
 }
 
-pub fn cleanup(g: &mut GlobalVariables) {
-    const MAX_PATH: u32 = 260_u32;
-    if g.engine_window_handle.is_some() {
-        // Restore the desktop wallpaper
-        let mut wallpaper_path = [0_u16; MAX_PATH as usize];
-        unsafe {
-            let result = SystemParametersInfoW(
-                SPI_GETDESKWALLPAPER,
-                MAX_PATH,
-                Some(wallpaper_path.as_mut_ptr() as *mut _),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            );
-            if result.is_ok() {
-                // Reapply the wallpaper to force a refresh
-                let _ = SystemParametersInfoW(
-                    SPI_SETDESKWALLPAPER,
-                    0,
-                    Some(wallpaper_path.as_mut_ptr() as *mut _),
-                    SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
-                );
-            }
-        }
-
-        g.progman_window_handle = None;
-        g.workerw_window_handle = None;
-        g.shell_view_whidow_handle = None;
-        g.engine_window_handle = None;
-    }
-}
-
-pub fn enumerate_monitors(g: &mut GlobalVariables) -> Vec<MonitorInfo> {
-    let mut monitor_info_vector: Vec<MonitorInfo> = Vec::new();
-    let lparam = LPARAM(&mut monitor_info_vector as *mut Vec<MonitorInfo> as isize);
-    let _ = unsafe { EnumDisplayMonitors(None, None, Some(monitor_enum_proc), lparam) };
-    // Convert to desktop coodrdinates starting at 0, 0
-    g.desktop_x = i32::MAX;
-    g.desktop_y = i32::MAX;
-
-    for monitor in &monitor_info_vector {
-        if monitor.x < g.desktop_x {
-            g.desktop_x = monitor.x;
-        }
-        if monitor.y < g.desktop_y {
-            g.desktop_y = monitor.y;
-        }
-    }
-
-    for monitor in &mut monitor_info_vector {
-        monitor.x -= g.desktop_x;
-        monitor.y -= g.desktop_y;
-    }
-
-    monitor_info_vector
-}
-
-pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut GlobalVariables) {
+pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut WindowsPlatform) {
     g.engine_window_handle = Some(hwnd);
 
     if g.engine_window_handle.is_none() || g.progman_window_handle.is_none() {
@@ -232,8 +172,8 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Glo
     }
 }
 
-pub fn get_wallpaper_target(g: &mut GlobalVariables, monitor_index: i32) -> MonitorInfo {
-    let monitors = enumerate_monitors(g);
+pub fn get_wallpaper_target(g: &mut WindowsPlatform, monitor_index: i32) -> MonitorInfo {
+    let monitors = g.enumerate_monitors();
 
     if monitor_index < 0 || monitor_index as usize >= monitors.len() {
         let mut info = MonitorInfo::default();
@@ -294,111 +234,17 @@ pub fn is_desktop_locked() -> bool {
 pub fn is_monitor_occluded(
     monitor: &MonitorInfo,
     threshold: f64,
-    global_variable: &mut GlobalVariables,
+    global_variable: &mut WindowsPlatform,
 ) -> bool {
     let mut occlusion_data = FullscrennOcclusionData::default();
     let wrapped = &mut (global_variable, &mut occlusion_data)
-        as *mut (&mut GlobalVariables, &mut FullscrennOcclusionData) as isize;
+        as *mut (&mut WindowsPlatform, &mut FullscrennOcclusionData) as isize;
     let lparam = LPARAM(wrapped);
 
     let _ = unsafe { EnumWindows(Some(fullscreen_window_enum_proc), lparam) };
     let occlusion_fraction =
         compute_occlution_fraction(&occlusion_data.occluded_rects, monitor, 100);
     occlusion_fraction >= threshold
-}
-
-pub fn update_mouse_state(g: &mut GlobalVariables) {
-    // Save previous state
-    g.previous_mouse_state
-        .copy_from_slice(&g.current_mouse_state);
-
-    let get_virtual_key_for_mouse_button = |button: usize| -> u16 {
-        match button {
-            0 => VK_LBUTTON,
-            1 => VK_RBUTTON,
-            2 => VK_MBUTTON,
-            3 => VK_XBUTTON1,
-            4 => VK_XBUTTON2,
-            _ => VIRTUAL_KEY::default(),
-        }
-        .0
-    };
-
-    // Update current state
-    (0..5).for_each(|i| {
-        g.current_mouse_state[i] = match get_virtual_key_for_mouse_button(i) {
-            0 => false,
-            _ => true,
-        }
-    });
-}
-
-pub fn is_mouse_button_pressed(button: i32, g: &GlobalVariables) -> bool {
-    if button < 0 || button >= 5 {
-        return false;
-    }
-    let button = button as usize;
-    g.current_mouse_state[button] && !g.previous_mouse_state[button]
-}
-
-pub fn is_mouse_button_donw(button: i32, g: &GlobalVariables) -> bool {
-    if button < 0 || button >= 5 {
-        return false;
-    }
-    g.current_mouse_state[button as usize]
-}
-
-pub fn is_mouse_button_released(button: i32, g: &GlobalVariables) -> bool {
-    if button < 0 || button >= 5 {
-        return false;
-    }
-    let button = button as usize;
-    !g.current_mouse_state[button] && g.previous_mouse_state[button]
-}
-
-pub fn is_mouse_button_up(button: i32, g: &GlobalVariables) -> bool {
-    if button < 0 && button >= 5 {
-        return false;
-    }
-    !g.current_mouse_state[button as usize]
-}
-
-pub fn get_mouse_x(g: &GlobalVariables) -> i32 {
-    let mut p = POINT::default();
-
-    if get_relative_cursor_pos(&mut p, g) {
-        return p.x;
-    }
-    0
-}
-
-pub fn get_mouse_y(g: &GlobalVariables) -> i32 {
-    let mut p = POINT::default();
-
-    if get_relative_cursor_pos(&mut p, g) {
-        return p.y;
-    }
-    0
-}
-
-pub fn get_mouse_position(g: &GlobalVariables) -> Vector2Platform {
-    let mut p = POINT::default();
-
-    if get_relative_cursor_pos(&mut p, g) {
-        return Vector2Platform {
-            x: p.x as _,
-            y: p.y as _,
-        };
-    }
-    Vector2Platform { x: 0_f32, y: 0_f32 }
-}
-
-pub fn supports_dynamuc_wallpaper() -> bool {
-    true
-}
-
-pub fn supports_multi_monito() -> bool {
-    true
 }
 
 pub fn show_alert(title: &str, message: &str) {
@@ -461,24 +307,6 @@ pub fn is_invisible_win10_background_app_window(hwnd: HWND) -> bool {
         )
     };
     hres.is_ok() && cloaked_val != 0
-}
-
-fn get_relative_cursor_pos(p: &mut POINT, g: &GlobalVariables) -> bool {
-    unsafe {
-        if GetCursorPos(p).is_err() {
-            return false;
-        }
-
-        // Convert to desktop coordinates
-        p.x -= g.desktop_x;
-        p.y -= g.desktop_y;
-
-        // Convert to window coordinates
-        p.x -= g.selected_monitor.as_ref().unwrap().x;
-        p.y -= g.selected_monitor.as_ref().unwrap().y;
-
-        true
-    }
 }
 
 fn is_secure_desktop() -> bool {
