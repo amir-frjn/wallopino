@@ -17,13 +17,9 @@ use windows::{
                 QueryFullProcessImageNameW,
             },
         },
-        UI::{
-            HiDpi::{PROCESS_PER_MONITOR_DPI_AWARE, SetProcessDpiAwareness},
-            Shell::PathFindFileNameW,
-            WindowsAndMessaging::*,
-        },
+        UI::{Shell::PathFindFileNameW, WindowsAndMessaging::*},
     },
-    core::{Error as WinErr, PCWSTR, PWSTR, w},
+    core::{PCWSTR, PWSTR},
 };
 
 use crate::platform::windows::{
@@ -32,7 +28,7 @@ use crate::platform::windows::{
 };
 
 pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut WindowsPlatform) {
-    let progman = match g.progman_window_handle {
+    let _ = match g.progman_window_handle {
         Some(hwnd) => hwnd,
         None => return,
     };

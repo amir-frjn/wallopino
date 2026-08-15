@@ -9,7 +9,7 @@ use windows::{
                 VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
             },
             WindowsAndMessaging::{
-                EnumWindows, FindWindowExW, FindWindowW, GetCaretPos, GetCursorPos, SMTO_NORMAL,
+                EnumWindows, FindWindowExW, FindWindowW, GetCursorPos, SMTO_NORMAL,
                 SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageTimeoutW, SystemParametersInfoW,
             },
