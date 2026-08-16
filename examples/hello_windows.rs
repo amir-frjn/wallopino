@@ -1,22 +1,12 @@
-use std::ptr::null_mut;
-
-use lumin_wallpaper_rs::{MonitorInfo, WindowsPlatform, configure_wallpaper_window};
-
+#[allow(dead_code, warnings, unsafe_code)]
+use lumin_wallpaper_rs::WindowsPlatform;
+use std::{thread::sleep, time::Duration};
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::{
-            BeginPaint, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DrawTextW, EndPaint, PAINTSTRUCT,
-        },
-        System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::{
-            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-            DispatchMessageW, GetMessageW, HMENU, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage,
-            RegisterClassW, SW_HIDE, SW_SHOW, ShowWindow, TranslateMessage, WM_DESTROY,
-            WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_POPUP,
-        },
+        Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleW,
+        UI::WindowsAndMessaging::*,
     },
-    core::{PCWSTR, w},
+    core::w,
 };
 
 unsafe extern "system" fn window_proc(
@@ -28,31 +18,21 @@ unsafe extern "system" fn window_proc(
     match msg {
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
+
             let hdc = BeginPaint(hwnd, &mut ps);
 
-            let mut rect = ps.rcPaint;
+            let text: Vec<u16> = "Hello World from Rust HWND".encode_utf16().collect();
 
-            let mut text: Vec<u16> = "Hello Lumin-RS"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-
-            DrawTextW(
-                hdc,
-                &mut text,
-                &mut rect,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-            );
+            TextOutW(hdc, 50, 50, &text);
 
             EndPaint(hwnd, &ps);
 
             LRESULT(0)
         }
 
-        WM_ERASEBKGND => LRESULT(1),
-
         WM_DESTROY => {
             PostQuitMessage(0);
+
             LRESULT(0)
         }
 
@@ -60,84 +40,75 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-fn main() -> windows::core::Result<()> {
+fn create_window() -> HWND {
     unsafe {
-        // Initialize the Windows backend.
-        let mut platform = WindowsPlatform::initialize()?;
+        let instance: HINSTANCE = GetModuleHandleW(None).unwrap().into();
 
-        // -1 means the entire virtual desktop.
-        let monitor: MonitorInfo = platform.get_wallpaper_target(-1_i32);
-
-        let instance = GetModuleHandleW(None)?.into();
-
-        let class_name = w!("LuminRsHelloWindow");
-
-        let cursor = LoadCursorW(None, IDC_ARROW)?;
+        let class_name = w!("SimpleRustWindow");
 
         let wc = WNDCLASSW {
-            hCursor: cursor,
-            hInstance: instance,
-            lpszClassName: class_name,
-            style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(window_proc),
+
+            hInstance: instance,
+
+            lpszClassName: class_name,
+
             ..Default::default()
         };
 
-        if RegisterClassW(&wc) == 0 {
-            return Err(windows::core::Error::from_win32());
-        }
+        RegisterClassW(&wc);
 
-        // Create a normal Win32 popup window.
-        let hwnd = CreateWindowExW(
-            Default::default(),
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
             class_name,
-            w!("Lumin-RS"),
-            WS_POPUP,
+            w!("Rust HWND Test"),
+            WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            monitor.width,
-            monitor.height,
+            800,
+            600,
             None,
-            HMENU(null_mut()).into(),
-            instance.into(),
             None,
-        )?;
+            Some(instance),
+            None,
+        )
+        .unwrap()
+    }
+}
 
-        // Keep hidden while we attach it to the desktop.
-        ShowWindow(hwnd, SW_HIDE);
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let hwnd = create_window();
 
-        println!("Created HWND: {:?}", hwnd);
+    unsafe {
+        let mut platform = WindowsPlatform::initialize()?;
+        let monitor_info = platform.get_wallpaper_target(-1);
 
-        // Attach the window to the Windows desktop.
-        configure_wallpaper_window(hwnd, &monitor, &mut platform);
+        platform.configure_wallpaper_window(hwnd, &monitor_info);
+        let workerw = platform.workerw_window_handle.expect("WorkerW not found");
         ShowWindow(hwnd, SW_SHOW);
 
-        // Now display it.
+        SetParent(hwnd, Some(workerw));
 
-        println!("Wallpaper window is now attached.");
-        println!("Close the process with Ctrl+C.");
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+            SWP_NOZORDER | SWP_SHOWWINDOW,
+        );
+    }
 
-        // Standard Win32 message loop.
+    // 4. Existing message loop
+    unsafe {
         let mut msg = MSG::default();
 
-        loop {
-            let result = GetMessageW(&mut msg, None, 0, 0);
-
-            if result.0 == -1 {
-                return Err(windows::core::Error::from_win32());
-            }
-
-            if result.0 == 0 {
-                break;
-            }
-
+        while GetMessageW(&mut msg, None, 0, 0).into() {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-
-        // Restore desktop state.
-        platform.cleanup();
-
-        Ok(())
     }
+
+    Ok(())
 }

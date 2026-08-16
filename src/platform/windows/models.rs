@@ -1,7 +1,7 @@
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM},
-        Graphics::Gdi::EnumDisplayMonitors,
+        Foundation::{COLORREF, CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM},
+        Graphics::Gdi::{EnumDisplayMonitors, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow},
         System::StationsAndDesktops::{CloseDesktop, HDESK},
         UI::{
             HiDpi::{PROCESS_PER_MONITOR_DPI_AWARE, SetProcessDpiAwareness},
@@ -9,10 +9,13 @@ use windows::{
                 GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
             },
             WindowsAndMessaging::{
-                EnumWindows, FindWindowExW, FindWindowW, GetCursorPos, GetSystemMetrics,
-                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SMTO_NORMAL, SPI_GETDESKWALLPAPER,
-                SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageTimeoutW, SystemParametersInfoW,
+                EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetCursorPos,
+                GetSystemMetrics, GetWindowLongPtrW, LWA_ALPHA, SM_CXVIRTUALSCREEN,
+                SM_CYVIRTUALSCREEN, SMTO_NORMAL, SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER,
+                SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageTimeoutW,
+                SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos,
+                SystemParametersInfoW, WS_CHILD, WS_EX_LAYERED, WS_OVERLAPPEDWINDOW,
             },
         },
     },
@@ -117,6 +120,90 @@ impl WindowsPlatform {
             }
         }
         Ok(windows_platform)
+    }
+
+    pub fn configure_wallpaper_window(&mut self, hwnd: HWND, monitor: &MonitorInfo) {
+        self.engine_window_handle = Some(hwnd);
+
+        if self.progman_window_handle.is_none() {
+            return;
+        }
+
+        unsafe {
+            if self.is_pre_24h2 {
+                // Reparent the window to the custom WorkerW window.
+                // This attaches the window as a child of your WorkerW,
+                // which should place it behind desktop icons if your WorkerW is set up that way.
+                let _ = SetParent(hwnd, self.workerw_window_handle);
+
+                // Adjust window styles so that it behaves like a wallpaper.
+                // For example, you may remove the title bar or border:
+                let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove common overlapped window styles.
+                style |= WS_CHILD.0 as isize; // Make it a child window.
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+            } else {
+                // Prepare the engine window to be a layered child of Progman
+                let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove decorations
+                style |= WS_CHILD.0 as isize; // Child style required for SetParent
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+
+                let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                ex_style |= WS_EX_LAYERED.0 as isize; // Make it a layered window for 24h2
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+
+                // Reparent the engine window directly to Progman
+                let _ = SetParent(hwnd, self.progman_window_handle);
+
+                // Ensure correct Z-order: below icons but above the system wallpaper
+                if self.shell_view_window_handle.is_some() {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        self.shell_view_window_handle,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+                if self.workerw_window_handle.is_some() {
+                    let _ = SetWindowPos(
+                        self.workerw_window_handle.unwrap(),
+                        self.engine_window_handle,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+            }
+
+            // Reparent the engine window to WorkerW
+            self.selected_monitor = Some(monitor.clone());
+
+            // Resize/reposition the engine window to match its new parent.
+            // g_progmanWindowHandle spans the entire virtual desktop in modern builds
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                monitor.x,
+                monitor.y,
+                monitor.width,
+                monitor.height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+
+            let _ = RedrawWindow(
+                self.engine_window_handle,
+                None,
+                None,
+                RDW_INVALIDATE | RDW_UPDATENOW,
+            );
+        }
     }
 
     pub fn get_wallpaper_target(&mut self, monitor_index: i32) -> MonitorInfo {
