@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe {
         let mut platform = WindowsPlatform::initialize()?;
-        let monitor_info = platform.get_wallpaper_target(-1);
+        let monitor_info = platform.get_wallpaper_target(-1)?;
 
         platform.configure_wallpaper_window(hwnd, &monitor_info);
         let workerw = platform.workerw_window_handle.expect("WorkerW not found");

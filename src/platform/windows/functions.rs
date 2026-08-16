@@ -1,5 +1,3 @@
-// use std::os::windows;
-
 use windows::{
     Win32::{
         Foundation::*,
@@ -16,7 +14,7 @@ use windows::{
         },
         UI::{Shell::PathFindFileNameW, WindowsAndMessaging::*},
     },
-    core::{PCWSTR, PWSTR},
+    core::{Error as WinError, PCWSTR, PWSTR},
 };
 
 use crate::platform::windows::{
@@ -71,17 +69,17 @@ pub fn is_monitor_occluded(
     monitor: &MonitorInfo,
     threshold: f64,
     global_variable: &mut WindowsPlatform,
-) -> bool {
+) -> Result<bool, WinError> {
     let mut occlusion_data = FullscreenOcclusionData::default();
     occlusion_data.monitor = monitor.clone();
 
     let mut data = (global_variable, &mut occlusion_data);
     let lparam = LPARAM(&mut data as *mut _ as isize);
 
-    let _ = unsafe { EnumWindows(Some(fullscreen_window_enum_proc), lparam) };
+    unsafe { EnumWindows(Some(fullscreen_window_enum_proc), lparam)? };
     let occlusion_fraction =
         compute_occlusion_fraction(&occlusion_data.occluded_rects, monitor, 100);
-    occlusion_fraction >= threshold
+    Ok(occlusion_fraction >= threshold)
 }
 
 pub fn show_alert(title: &str, message: &str) {

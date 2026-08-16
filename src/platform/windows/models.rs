@@ -59,7 +59,7 @@ impl WindowsPlatform {
     pub fn get_mouse_y(&self) -> i32 {
         let mut p = POINT::default();
 
-        if self.get_relative_cursor_pos(&mut p) {
+        if self.get_relative_cursor_pos(&mut p).is_ok() {
             return p.y;
         }
         0
@@ -122,11 +122,15 @@ impl WindowsPlatform {
         Ok(windows_platform)
     }
 
-    pub fn configure_wallpaper_window(&mut self, hwnd: HWND, monitor: &MonitorInfo) {
+    pub fn configure_wallpaper_window(
+        &mut self,
+        hwnd: HWND,
+        monitor: &MonitorInfo,
+    ) -> Result<(), WinErr> {
         self.engine_window_handle = Some(hwnd);
 
         if self.progman_window_handle.is_none() {
-            return;
+            return Ok(());
         }
 
         unsafe {
@@ -134,7 +138,7 @@ impl WindowsPlatform {
                 // Reparent the window to the custom WorkerW window.
                 // This attaches the window as a child of your WorkerW,
                 // which should place it behind desktop icons if your WorkerW is set up that way.
-                let _ = SetParent(hwnd, self.workerw_window_handle);
+                SetParent(hwnd, self.workerw_window_handle)?;
 
                 // Adjust window styles so that it behaves like a wallpaper.
                 // For example, you may remove the title bar or border:
@@ -152,14 +156,14 @@ impl WindowsPlatform {
                 let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 ex_style |= WS_EX_LAYERED.0 as isize; // Make it a layered window for 24h2
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
-                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
+                SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)?;
 
                 // Reparent the engine window directly to Progman
-                let _ = SetParent(hwnd, self.progman_window_handle);
+                SetParent(hwnd, self.progman_window_handle)?;
 
                 // Ensure correct Z-order: below icons but above the system wallpaper
                 if self.shell_view_window_handle.is_some() {
-                    let _ = SetWindowPos(
+                    SetWindowPos(
                         hwnd,
                         self.shell_view_window_handle,
                         0,
@@ -167,10 +171,10 @@ impl WindowsPlatform {
                         0,
                         0,
                         SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-                    );
+                    )?;
                 }
                 if self.workerw_window_handle.is_some() {
-                    let _ = SetWindowPos(
+                    SetWindowPos(
                         self.workerw_window_handle.unwrap(),
                         self.engine_window_handle,
                         0,
@@ -178,7 +182,7 @@ impl WindowsPlatform {
                         0,
                         0,
                         SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-                    );
+                    )?;
                 }
             }
 
@@ -187,7 +191,7 @@ impl WindowsPlatform {
 
             // Resize/reposition the engine window to match its new parent.
             // g_progmanWindowHandle spans the entire virtual desktop in modern builds
-            let _ = SetWindowPos(
+            SetWindowPos(
                 hwnd,
                 None,
                 monitor.x,
@@ -195,19 +199,21 @@ impl WindowsPlatform {
                 monitor.width,
                 monitor.height,
                 SWP_NOZORDER | SWP_NOACTIVATE,
-            );
+            )?;
 
-            let _ = RedrawWindow(
+            RedrawWindow(
                 self.engine_window_handle,
                 None,
                 None,
                 RDW_INVALIDATE | RDW_UPDATENOW,
-            );
+            )
+            .ok()?;
         }
+        Ok(())
     }
 
-    pub fn get_wallpaper_target(&mut self, monitor_index: i32) -> MonitorInfo {
-        let monitors = self.enumerate_monitors();
+    pub fn get_wallpaper_target(&mut self, monitor_index: i32) -> Result<MonitorInfo, WinErr> {
+        let monitors = self.enumerate_monitors()?;
 
         if monitor_index < 0 || monitor_index as usize >= monitors.len() {
             let mut info = MonitorInfo::default();
@@ -217,16 +223,16 @@ impl WindowsPlatform {
                 info.width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
                 info.height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
             }
-            info
+            Ok(info)
         } else {
-            monitors[monitor_index as usize].clone()
+            Ok(monitors[monitor_index as usize].clone())
         }
     }
 
-    pub fn enumerate_monitors(&mut self) -> Vec<MonitorInfo> {
+    pub fn enumerate_monitors(&mut self) -> Result<Vec<MonitorInfo>, WinErr> {
         let mut monitor_info_vector: Vec<MonitorInfo> = Vec::new();
         let lparam = LPARAM(&mut monitor_info_vector as *mut Vec<MonitorInfo> as isize);
-        let _ = unsafe { EnumDisplayMonitors(None, None, Some(monitor_enum_proc), lparam) };
+        unsafe { EnumDisplayMonitors(None, None, Some(monitor_enum_proc), lparam).ok()? };
 
         // Convert to desktop coodrdinates starting at 0, 0
         self.desktop_x = i32::MAX;
@@ -242,13 +248,13 @@ impl WindowsPlatform {
             monitor.y -= self.desktop_y;
         }
 
-        monitor_info_vector
+        Ok(monitor_info_vector)
     }
 
     pub fn get_mouse_position(&self) -> Vector2Platform {
         let mut p = POINT::default();
 
-        if self.get_relative_cursor_pos(&mut p) {
+        if self.get_relative_cursor_pos(&mut p).is_ok() {
             return Vector2Platform {
                 x: p.x as _,
                 y: p.y as _,
@@ -298,30 +304,28 @@ impl WindowsPlatform {
     pub fn get_mouse_x(&self) -> i32 {
         let mut p = POINT::default();
 
-        if self.get_relative_cursor_pos(&mut p) {
+        if self.get_relative_cursor_pos(&mut p).is_ok() {
             return p.x;
         }
         0
     }
 
-    fn get_relative_cursor_pos(&self, p: &mut POINT) -> bool {
-        if unsafe { GetCursorPos(p) }.is_err() {
-            return false;
-        }
+    fn get_relative_cursor_pos(&self, p: &mut POINT) -> Result<(), WinErr> {
+        unsafe { GetCursorPos(p)? }
 
         // Convert to desktop coordinates
         p.x -= self.desktop_x;
         p.y -= self.desktop_y;
 
         // Convert to window coordinates
-        let selected_monitor = self.selected_monitor.as_ref().unwrap();
+        let selected_monitor = self.selected_monitor.as_ref().ok_or(WinErr::empty())?;
         p.x -= selected_monitor.x;
         p.y -= selected_monitor.y;
 
-        true
+        Ok(())
     }
 
-    pub fn cleanup(&mut self) {
+    pub fn cleanup(&mut self) -> Result<(), WinErr> {
         const MAX_PATH: u32 = 260_u32;
         if self.engine_window_handle.is_some() {
             // Restore the desktop wallpaper
@@ -336,12 +340,12 @@ impl WindowsPlatform {
                 .is_ok()
                 {
                     // Reapply the wallpaper to force a refresh
-                    let _ = SystemParametersInfoW(
+                    SystemParametersInfoW(
                         SPI_SETDESKWALLPAPER,
                         0,
                         Some(wallpaper_path.as_mut_ptr() as *mut _),
                         SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
-                    );
+                    )?;
                 }
             }
         }
@@ -350,6 +354,7 @@ impl WindowsPlatform {
         self.workerw_window_handle = None;
         self.shell_view_window_handle = None;
         self.engine_window_handle = None;
+        Ok(())
     }
 
     pub fn update_mouse_state(&mut self) {
