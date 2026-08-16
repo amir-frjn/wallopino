@@ -1,9 +1,7 @@
 use windows::{
     Win32::{
         Foundation::{FALSE, HWND, LPARAM, RECT, TRUE},
-        Graphics::Gdi::{
-            GetMonitorInfoW, HDC, HMONITOR, IntersectRect, MONITORINFO, MONITORINFOEXW,
-        },
+        Graphics::Gdi::{GetMonitorInfoW, HDC, HMONITOR, IntersectRect, MONITORINFOEXW},
         UI::WindowsAndMessaging::{
             FindWindowExW, GetClassNameW, GetShellWindow, GetWindowRect, IsIconic, IsWindowVisible,
         },
@@ -13,7 +11,7 @@ use windows::{
 
 use crate::{
     is_invisible_win10_background_app_window,
-    platform::windows::models::{FullscreennOcclusionData, MonitorInfo, WindowsPlatform},
+    platform::windows::models::{FullscreenOcclusionData, MonitorInfo, WindowsPlatform},
 };
 
 fn class_name(hwnd: HWND) -> String {
@@ -24,8 +22,7 @@ fn class_name(hwnd: HWND) -> String {
 
 pub extern "system" fn fullscreen_window_enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
-        let wrapped =
-            &mut *(lparam.0 as *mut (&mut WindowsPlatform, &mut FullscreennOcclusionData));
+        let wrapped = &mut *(lparam.0 as *mut (&mut WindowsPlatform, &mut FullscreenOcclusionData));
         let (g, occlusion_data) = wrapped;
 
         if Some(hwnd) == g.engine_window_handle || Some(hwnd) == g.workerw_window_handle {

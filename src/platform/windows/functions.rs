@@ -23,23 +23,22 @@ use windows::{
 };
 
 use crate::platform::windows::{
-    models::{DesktopHandle, FullscreennOcclusionData, MonitorInfo, WindowsPlatform},
+    models::{DesktopHandle, FullscreenOcclusionData, Handle, MonitorInfo, WindowsPlatform},
     procs::fullscreen_window_enum_proc,
 };
 
 pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut WindowsPlatform) {
-    let _ = match g.progman_window_handle {
-        Some(hwnd) => hwnd,
-        None => return,
-    };
-
     g.engine_window_handle = Some(hwnd);
 
-    if g.is_pre_24h2 {
-        // Reparent the window to the custom WorkerW window.
-        // This attaches the window as a child of your WorkerW,
-        // which should place it behind desktop icons if your WorkerW is set up that way.
-        unsafe {
+    if g.progman_window_handle.is_none() {
+        return;
+    }
+
+    unsafe {
+        if g.is_pre_24h2 {
+            // Reparent the window to the custom WorkerW window.
+            // This attaches the window as a child of your WorkerW,
+            // which should place it behind desktop icons if your WorkerW is set up that way.
             let _ = SetParent(hwnd, g.workerw_window_handle);
 
             // Adjust window styles so that it behaves like a wallpaper.
@@ -48,9 +47,7 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Win
             style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove common overlapped window styles.
             style |= WS_CHILD.0 as isize; // Make it a child window.
             SetWindowLongPtrW(hwnd, GWL_STYLE, style);
-        }
-    } else {
-        unsafe {
+        } else {
             // Prepare the engine window to be a layered child of Progman
             let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             style &= !WS_OVERLAPPEDWINDOW.0 as isize; // Remove decorations
@@ -60,6 +57,7 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Win
             let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             ex_style |= WS_EX_LAYERED.0 as isize; // Make it a layered window for 24h2
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
 
             // Reparent the engine window directly to Progman
             let _ = SetParent(hwnd, g.progman_window_handle);
@@ -88,9 +86,7 @@ pub fn configure_wallpaper_window(hwnd: HWND, monitor: &MonitorInfo, g: &mut Win
                 );
             }
         }
-    }
 
-    unsafe {
         // Reparent the engine window to WorkerW
         g.selected_monitor = Some(monitor.clone());
 
@@ -132,15 +128,16 @@ pub fn is_desktop_locked() -> bool {
             return false;
         }
 
-        let Ok(proc) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return false;
+        let proc = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            Ok(h) => Handle(h),
+            Err(_) => return false,
         };
 
         let mut path = [0_u16; 260];
         let mut len = path.len() as u32;
 
         if QueryFullProcessImageNameW(
-            proc,
+            proc.0,
             PROCESS_NAME_FORMAT(0),
             PWSTR(path.as_mut_ptr()),
             &mut len,
@@ -148,7 +145,7 @@ pub fn is_desktop_locked() -> bool {
         .is_err()
         {
             return false;
-        };
+        }
 
         let filename = PathFindFileNameW(PWSTR(path.as_mut_ptr()));
         let filename = filename.as_wide();
@@ -162,14 +159,15 @@ pub fn is_monitor_occluded(
     threshold: f64,
     global_variable: &mut WindowsPlatform,
 ) -> bool {
-    let mut occlusion_data = FullscreennOcclusionData::default();
-    let wrapped = &mut (global_variable, &mut occlusion_data)
-        as *mut (&mut WindowsPlatform, &mut FullscreennOcclusionData) as isize;
-    let lparam = LPARAM(wrapped);
+    let mut occlusion_data = FullscreenOcclusionData::default();
+    occlusion_data.monitor = monitor.clone();
+
+    let mut data = (global_variable, &mut occlusion_data);
+    let lparam = LPARAM(&mut data as *mut _ as isize);
 
     let _ = unsafe { EnumWindows(Some(fullscreen_window_enum_proc), lparam) };
     let occlusion_fraction =
-        compute_occlution_fraction(&occlusion_data.occluded_rects, monitor, 100);
+        compute_occlusion_fraction(&occlusion_data.occluded_rects, monitor, 100);
     occlusion_fraction >= threshold
 }
 
@@ -187,33 +185,26 @@ pub fn show_alert(title: &str, message: &str) {
     }
 }
 
-fn compute_occlution_fraction(
-    occluded_rects: &Vec<RECT>,
+fn compute_occlusion_fraction(
+    occluded_rects: &[RECT],
     monitor: &MonitorInfo,
-    sample_step: i32,
+    sample_step: usize,
 ) -> f64 {
     let mut occluded_count = 0;
     let mut total_samples = 0;
 
-    let mut y = monitor.y;
-    while y < monitor.y + monitor.height {
-        let mut x = monitor.x;
-        while x < monitor.x + monitor.width {
+    for y in (monitor.y..monitor.y + monitor.height).step_by(sample_step) {
+        for x in (monitor.x..monitor.x + monitor.width).step_by(sample_step) {
             total_samples += 1;
-            let mut is_occluded = false;
 
-            for rect in occluded_rects {
-                if x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom {
-                    is_occluded = true;
-                    break;
-                }
-            }
+            let is_occluded = occluded_rects
+                .iter()
+                .any(|rect| x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom);
+
             if is_occluded {
                 occluded_count += 1;
             }
-            x += sample_step;
         }
-        y += sample_step;
     }
     if total_samples == 0 {
         return 0.0;
@@ -223,12 +214,11 @@ fn compute_occlution_fraction(
 
 pub fn is_invisible_win10_background_app_window(hwnd: HWND) -> bool {
     let mut cloaked_val = 0;
-    let pvattribute = &mut cloaked_val as *mut _ as *mut std::ffi::c_void;
     let hres = unsafe {
         DwmGetWindowAttribute(
             hwnd,
             DWMWA_CLOAKED,
-            pvattribute,
+            &mut cloaked_val as *mut _ as *mut _,
             size_of_val(&cloaked_val) as u32,
         )
     };
@@ -244,7 +234,7 @@ fn is_secure_desktop() -> bool {
         let mut bytes = 0_u32;
         let result =
             GetUserObjectInformationW(HANDLE(desktop.0.0), UOI_NAME, None, 0, Some(&mut bytes));
-        if result.is_ok() && GetLastError() != ERROR_INSUFFICIENT_BUFFER {
+        if result.is_err() && GetLastError() != ERROR_INSUFFICIENT_BUFFER {
             return true; // genuine failure
         }
 

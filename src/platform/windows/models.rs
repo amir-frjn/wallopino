@@ -1,12 +1,12 @@
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
+        Foundation::{CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM},
         Graphics::Gdi::EnumDisplayMonitors,
         System::StationsAndDesktops::{CloseDesktop, HDESK},
         UI::{
             HiDpi::{PROCESS_PER_MONITOR_DPI_AWARE, SetProcessDpiAwareness},
             Input::KeyboardAndMouse::{
-                VIRTUAL_KEY, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
+                GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
             },
             WindowsAndMessaging::{
                 EnumWindows, FindWindowExW, FindWindowW, GetCursorPos, GetSystemMetrics,
@@ -56,11 +56,12 @@ impl WindowsPlatform {
     pub fn get_mouse_y(&self) -> i32 {
         let mut p = POINT::default();
 
-        if Self::get_relative_cursor_pos(self, &mut p) {
+        if self.get_relative_cursor_pos(&mut p) {
             return p.y;
         }
         0
     }
+
     pub fn initialize() -> Result<Self, WinErr> {
         let mut windows_platform = Self::default();
         unsafe {
@@ -70,8 +71,6 @@ impl WindowsPlatform {
             if dpi_awareness_result.is_err() {
                 // Continue if needed, but coordinate values may be scaled.
             }
-
-            // Create global variables object at initialization then pass it as return type
 
             // Locate the Progman window (the desktop window)
             windows_platform.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
@@ -97,24 +96,27 @@ impl WindowsPlatform {
             )
             .ok();
 
-            windows_platform.workerw_window_handle = Some(
-                FindWindowExW(
-                    windows_platform.progman_window_handle,
-                    None,
-                    w!("WorkerW"),
-                    None,
-                )
-                .map_err(|e| {
-                    // Fallback for pre-24H2 builds where the WorkerW is a sibling window
-                    windows_platform.is_pre_24h2 = true;
-                    let lparam = LPARAM(&mut windows_platform as *mut WindowsPlatform as isize);
-                    let _ = EnumWindows(Some(enum_windows_proc), lparam);
-                    e
-                })?,
-            );
+            windows_platform.workerw_window_handle = FindWindowExW(
+                windows_platform.progman_window_handle,
+                None,
+                w!("WorkerW"),
+                None,
+            )
+            .ok();
 
-            Ok(windows_platform)
+            if windows_platform.workerw_window_handle.is_none() {
+                windows_platform.is_pre_24h2 = true;
+
+                EnumWindows(
+                    Some(enum_windows_proc),
+                    LPARAM(&mut windows_platform as *mut _ as _),
+                )?;
+            }
+            if windows_platform.workerw_window_handle.is_none() {
+                return Err(WinErr::empty());
+            }
         }
+        Ok(windows_platform)
     }
 
     pub fn get_wallpaper_target(&mut self, monitor_index: i32) -> MonitorInfo {
@@ -144,12 +146,8 @@ impl WindowsPlatform {
         self.desktop_y = i32::MAX;
 
         for monitor in &monitor_info_vector {
-            if monitor.x < self.desktop_x {
-                self.desktop_x = monitor.x;
-            }
-            if monitor.y < self.desktop_y {
-                self.desktop_y = monitor.y;
-            }
+            self.desktop_x = self.desktop_x.min(monitor.x);
+            self.desktop_y = self.desktop_y.min(monitor.y);
         }
 
         for monitor in &mut monitor_info_vector {
@@ -163,7 +161,7 @@ impl WindowsPlatform {
     pub fn get_mouse_position(&self) -> Vector2Platform {
         let mut p = POINT::default();
 
-        if Self::get_relative_cursor_pos(self, &mut p) {
+        if self.get_relative_cursor_pos(&mut p) {
             return Vector2Platform {
                 x: p.x as _,
                 y: p.y as _,
@@ -179,6 +177,7 @@ impl WindowsPlatform {
     pub fn supports_multi_monitor() -> bool {
         true
     }
+
     pub fn is_mouse_button_pressed(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
@@ -212,28 +211,27 @@ impl WindowsPlatform {
     pub fn get_mouse_x(&self) -> i32 {
         let mut p = POINT::default();
 
-        if Self::get_relative_cursor_pos(self, &mut p) {
+        if self.get_relative_cursor_pos(&mut p) {
             return p.x;
         }
         0
     }
 
     fn get_relative_cursor_pos(&self, p: &mut POINT) -> bool {
-        unsafe {
-            if GetCursorPos(p).is_err() {
-                return false;
-            }
-
-            // Convert to desktop coordinates
-            p.x -= self.desktop_x;
-            p.y -= self.desktop_y;
-
-            // Convert to window coordinates
-            p.x -= self.selected_monitor.as_ref().unwrap().x;
-            p.y -= self.selected_monitor.as_ref().unwrap().y;
-
-            true
+        if unsafe { GetCursorPos(p) }.is_err() {
+            return false;
         }
+
+        // Convert to desktop coordinates
+        p.x -= self.desktop_x;
+        p.y -= self.desktop_y;
+
+        // Convert to window coordinates
+        let selected_monitor = self.selected_monitor.as_ref().unwrap();
+        p.x -= selected_monitor.x;
+        p.y -= selected_monitor.y;
+
+        true
     }
 
     pub fn cleanup(&mut self) {
@@ -242,13 +240,14 @@ impl WindowsPlatform {
             // Restore the desktop wallpaper
             let mut wallpaper_path = [0_u16; MAX_PATH as usize];
             unsafe {
-                let result = SystemParametersInfoW(
+                if SystemParametersInfoW(
                     SPI_GETDESKWALLPAPER,
                     MAX_PATH,
                     Some(wallpaper_path.as_mut_ptr() as *mut _),
                     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-                );
-                if result.is_ok() {
+                )
+                .is_ok()
+                {
                     // Reapply the wallpaper to force a refresh
                     let _ = SystemParametersInfoW(
                         SPI_SETDESKWALLPAPER,
@@ -258,38 +257,36 @@ impl WindowsPlatform {
                     );
                 }
             }
-
-            self.progman_window_handle = None;
-            self.workerw_window_handle = None;
-            self.shell_view_window_handle = None;
-            self.engine_window_handle = None;
         }
+
+        self.progman_window_handle = None;
+        self.workerw_window_handle = None;
+        self.shell_view_window_handle = None;
+        self.engine_window_handle = None;
     }
 
     pub fn update_mouse_state(&mut self) {
         // Save previous state
         self.previous_mouse_state
             .copy_from_slice(&self.current_mouse_state);
-
-        let get_virtual_key_for_mouse_button = |button: usize| -> u16 {
-            match button {
-                0 => VK_LBUTTON,
-                1 => VK_RBUTTON,
-                2 => VK_MBUTTON,
-                3 => VK_XBUTTON1,
-                4 => VK_XBUTTON2,
-                _ => VIRTUAL_KEY::default(),
-            }
-            .0
-        };
-
         // Update current state
         (0..5).for_each(|i| {
-            self.current_mouse_state[i] = match get_virtual_key_for_mouse_button(i) {
+            self.current_mouse_state[i] = match get_virtual_key_for_mouse_button(i) as _ {
                 0 => false,
-                _ => true,
+                vk => unsafe { (GetAsyncKeyState(vk) as i32 & 0x8000) != 0 },
             }
         });
+    }
+}
+
+fn get_virtual_key_for_mouse_button(button: usize) -> u16 {
+    match button {
+        0 => VK_LBUTTON.0,
+        1 => VK_RBUTTON.0,
+        2 => VK_MBUTTON.0,
+        3 => VK_XBUTTON1.0,
+        4 => VK_XBUTTON2.0,
+        _ => 0,
     }
 }
 #[derive(Debug, Default, Clone)]
@@ -308,7 +305,7 @@ pub struct MonitorInfo {
 }
 
 #[derive(Debug, Default)]
-pub struct FullscreennOcclusionData {
+pub struct FullscreenOcclusionData {
     pub monitor: MonitorInfo,
     pub occluded_rects: Vec<RECT>,
 }
@@ -324,7 +321,21 @@ pub struct DesktopHandle(pub HDESK);
 impl Drop for DesktopHandle {
     fn drop(&mut self) {
         unsafe {
-            let _ = CloseDesktop(self.0);
+            if !self.0.is_invalid() {
+                let _ = CloseDesktop(self.0);
+            }
+        }
+    }
+}
+
+pub struct Handle(pub HANDLE);
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.0.is_invalid() {
+                let _ = CloseHandle(self.0);
+            }
         }
     }
 }
