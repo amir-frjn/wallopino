@@ -1,114 +1,102 @@
-#[allow(dead_code, warnings, unsafe_code)]
-use lumin_wallpaper_rs::WindowsPlatform;
-use std::{thread::sleep, time::Duration};
-use windows::{
-    Win32::{
-        Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::*,
-    },
-    core::w,
+use std::{
+    error::Error,
+    path::{Path, PathBuf},
 };
 
-unsafe extern "system" fn window_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match msg {
-        WM_PAINT => {
-            let mut ps = PAINTSTRUCT::default();
+use lumin_wallpaper_rs::WindowsPlatform;
+use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    platform::windows::WindowExtWindows,
+    window::WindowBuilder,
+};
 
-            let hdc = BeginPaint(hwnd, &mut ps);
+use windows::Win32::Foundation::HWND;
+use wry::WebViewBuilder;
 
-            let text: Vec<u16> = "Hello World from Rust HWND".encode_utf16().collect();
+fn main() -> Result<(), Box<dyn Error>> {
+    let exe_dir = Path::new("./examples").canonicalize()?;
 
-            TextOutW(hdc, 50, 50, &text);
+    let html_path: PathBuf = exe_dir.join("index.html");
 
-            EndPaint(hwnd, &ps);
+    if !html_path.exists() {
+        return Err(format!("index.html was not found:\n{}", html_path.display()).into());
+    }
 
-            LRESULT(0)
+    let html_url = url::Url::from_file_path(&html_path)
+        .map_err(|_| "Could not convert HTML path into a file URL")?
+        .to_string();
+
+    println!("HTML: {}", html_path.display());
+    println!("URL: {}", html_url);
+
+    // ------------------------------------------------------------
+    // 2. Create the native Windows event loop.
+    // ------------------------------------------------------------
+    let event_loop = EventLoop::new();
+
+    // ------------------------------------------------------------
+    // 3. Create the native window.
+    // ------------------------------------------------------------
+    let window = WindowBuilder::new()
+        .with_title("Rust + WebView2")
+        .with_inner_size(LogicalSize::new(1000.0, 700.0))
+        .with_resizable(true)
+        .build(&event_loop)?;
+
+    // ------------------------------------------------------------
+    // 4. Get the native HWND.
+    // ------------------------------------------------------------
+    let hwnd = window.hwnd();
+    WindowsPlatform::auto_attach(HWND(hwnd as _));
+    println!("HWND = 0x{:X}", hwnd as usize);
+
+    // You can pass this HWND to your own Windows code here.
+    //
+    // For example:
+    //
+    // attach_to_desktop(hwnd);
+    // set_window_style(hwnd);
+    // subclass_window(hwnd);
+    //
+    // hwnd remains the native handle of the Tao window.
+
+    // ------------------------------------------------------------
+    // 5. Create the WebView.
+    // ------------------------------------------------------------
+    //
+    // Because index.html is loaded as a file URL, relative resources
+    // such as:
+    //
+    //     ./style.css
+    //     ./animation.json
+    //
+    // can be referenced from index.html.
+    //
+    let _webview = WebViewBuilder::new()
+        .with_url(&html_url)
+        .with_devtools(cfg!(debug_assertions))
+        .build(&window)?;
+
+    println!("WebView created successfully.");
+
+    // ------------------------------------------------------------
+    // 6. Run the native event loop.
+    // ------------------------------------------------------------
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                window_id,
+                ..
+            } if window_id == window.id() => {
+                *control_flow = ControlFlow::Exit;
+            }
+
+            _ => {}
         }
-
-        WM_DESTROY => {
-            PostQuitMessage(0);
-
-            LRESULT(0)
-        }
-
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-    }
-}
-
-fn create_window() -> HWND {
-    unsafe {
-        let instance: HINSTANCE = GetModuleHandleW(None).unwrap().into();
-
-        let class_name = w!("SimpleRustWindow");
-
-        let wc = WNDCLASSW {
-            lpfnWndProc: Some(window_proc),
-
-            hInstance: instance,
-
-            lpszClassName: class_name,
-
-            ..Default::default()
-        };
-
-        RegisterClassW(&wc);
-
-        CreateWindowExW(
-            WINDOW_EX_STYLE(0),
-            class_name,
-            w!("Rust HWND Test"),
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            800,
-            600,
-            None,
-            None,
-            Some(instance),
-            None,
-        )
-        .unwrap()
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let hwnd = create_window();
-
-    unsafe {
-        let mut platform = WindowsPlatform::initialize()?;
-        let monitor_info = platform.get_wallpaper_target(-1)?;
-
-        platform.configure_wallpaper_window(hwnd, &monitor_info);
-        let workerw = platform.workerw_window_handle.expect("WorkerW not found");
-        ShowWindow(hwnd, SW_SHOW);
-
-        SetParent(hwnd, Some(workerw));
-
-        SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            GetSystemMetrics(SM_CXVIRTUALSCREEN),
-            GetSystemMetrics(SM_CYVIRTUALSCREEN),
-            SWP_NOZORDER | SWP_SHOWWINDOW,
-        );
-    }
-
-    // 4. Existing message loop
-    unsafe {
-        let mut msg = MSG::default();
-
-        while GetMessageW(&mut msg, None, 0, 0).into() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-
-    Ok(())
+    });
 }

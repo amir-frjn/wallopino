@@ -1,3 +1,3 @@
 pub mod functions;
 pub mod models;
-pub mod procs;
+mod procs;

@@ -16,5 +16,9 @@ windows = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_HiDpi",
     "Win32_System_LibraryLoader",
+    "Win32_Graphics_Gdi"
 
 ] }
+tao = "0.35"
+wry = "0.56"
+url = "2"
