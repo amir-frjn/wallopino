@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
@@ -19,6 +19,10 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Gdi"
 
 ] }
-tao = "0.35"
-wry = "0.56"
-url = "2"
+
+[dev-dependencies]
+wry = "0.53"
+tao = "0.34"
+
+
+

@@ -239,7 +239,7 @@ impl WindowsPlatform {
         Ok(windows_platform)
     }
 
-    // Automatically attaches the standard window handle (`HWND`) to the background.
+    // Automatically attaches the standard window handle (isize pointer) to the background.
     ///
     /// This method performs the following steps in sequence:
     /// 1. Initializes the platform backend via [`Self::initialize`].
@@ -254,13 +254,13 @@ impl WindowsPlatform {
     ///
     /// # Example
     /// ```rust
-    /// let mut platform = Self::auto_attach(hwnd: HWND)?;
+    /// let mut platform = Self::auto_attach(hwnd: isize)?;
     ///
     /// ```
     ///
     /// # Errors
     /// Returns an error if any of the initialization, monitor retrieval, or configuration steps fail.
-    pub fn auto_attach(hwnd: HWND) -> Result<Self, WinErr> {
+    pub fn auto_attach(hwnd: isize) -> Result<Self, WinErr> {
         let mut window_platform = Self::initialize()?;
         let monitor = window_platform.get_wallpaper_target(None)?;
         window_platform.configure_wallpaper_window(hwnd, &monitor)?;
@@ -305,7 +305,7 @@ impl WindowsPlatform {
     ///
     /// # Safety
     /// This function contains `unsafe` blocks for Windows API calls. The caller must ensure:
-    /// - The `hwnd` is a valid window handle.
+    /// - The `hwnd` is a valid window handle (and isize number that will cast into HWND automatically).
     /// - The window is not already destroyed or in an invalid state.
     /// - The process has appropriate permissions for window manipulation.
     ///
@@ -317,9 +317,11 @@ impl WindowsPlatform {
     /// ```
     pub fn configure_wallpaper_window(
         &mut self,
-        hwnd: HWND,
+        hwnd: isize,
         monitor: &MonitorInfo,
     ) -> Result<(), WinErr> {
+        let hwnd = HWND(hwnd as _);
+
         self.engine_window_handle = Some(hwnd);
 
         if self.progman_window_handle.is_none() {
@@ -588,6 +590,21 @@ impl WindowsPlatform {
         true
     }
 
+    /// Checks if a mouse button was just pressed (edge-triggered).
+    ///
+    /// Returns `true` when the button transitions from released to pressed this frame.
+    ///
+    /// # Button Indices
+    /// | Index | Button        |
+    /// |-------|---------------|
+    /// | 0     | Left          |
+    /// | 1     | Right         |
+    /// | 2     | Middle        |
+    /// | 3     | X1 (Back)     |
+    /// | 4     | X2 (Forward)  |
+    ///
+    /// # Returns
+    /// `true` if the button was just pressed, `false` otherwise.
     pub fn is_mouse_button_pressed(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
@@ -596,6 +613,23 @@ impl WindowsPlatform {
         self.current_mouse_state[button] && !self.previous_mouse_state[button]
     }
 
+    /// Checks if a mouse button is currently being held down (state-triggered).
+    ///
+    /// Returns `true` if the button is pressed at this moment, regardless of whether
+    /// it was just pressed or has been held for multiple frames.
+    ///
+    /// # Button Indices
+    /// | Index | Button        |
+    /// |-------|---------------|
+    /// | 0     | Left          |
+    /// | 1     | Right         |
+    /// | 2     | Middle        |
+    /// | 3     | X1 (Back)     |
+    /// | 4     | X2 (Forward)  |
+    ///
+    /// # Returns
+    /// `true` if the button is currently held down, `false` otherwise.
+    ///
     pub fn is_mouse_button_down(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
@@ -603,6 +637,22 @@ impl WindowsPlatform {
         self.current_mouse_state[button as usize]
     }
 
+    /// Checks if a mouse button was just released (edge-triggered).
+    ///
+    /// Returns `true` only when the button transitions from pressed to released
+    /// in the current frame.
+    ///
+    /// # Button Indices
+    /// | Index | Button        |
+    /// |-------|---------------|
+    /// | 0     | Left          |
+    /// | 1     | Right         |
+    /// | 2     | Middle        |
+    /// | 3     | X1 (Back)     |
+    /// | 4     | X2 (Forward)  |
+    ///
+    /// # Returns
+    /// `true` if the button was just released, `false` otherwise.
     pub fn is_mouse_button_released(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
@@ -611,6 +661,21 @@ impl WindowsPlatform {
         !self.current_mouse_state[button] && self.previous_mouse_state[button]
     }
 
+    /// Checks if a mouse button is currently released (not being held down).
+    ///
+    /// Returns `true` if the button is not pressed at this moment.
+    ///
+    /// # Button Indices
+    /// | Index | Button        |
+    /// |-------|---------------|
+    /// | 0     | Left          |
+    /// | 1     | Right         |
+    /// | 2     | Middle        |
+    /// | 3     | X1 (Back)     |
+    /// | 4     | X2 (Forward)  |
+    ///
+    /// # Returns
+    /// `true` if the button is currently released, `false` otherwise.
     pub fn is_mouse_button_up(&self, button: i32) -> bool {
         if button < 0 || button >= 5 {
             return false;
