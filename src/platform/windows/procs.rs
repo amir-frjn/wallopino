@@ -1,16 +1,21 @@
+use std::{cell::RefCell, sync::mpsc::Sender};
+
 use windows::{
     Win32::{
-        Foundation::{FALSE, HWND, LPARAM, RECT, TRUE},
+        Foundation::{FALSE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM},
         Graphics::Gdi::{GetMonitorInfoW, HDC, HMONITOR, IntersectRect, MONITORINFOEXW},
         UI::WindowsAndMessaging::{
-            FindWindowExW, GetClassNameW, GetShellWindow, GetWindowRect, IsIconic, IsWindowVisible,
+            CallNextHookEx, FindWindowExW, GetClassNameW, GetShellWindow, GetWindowRect, HC_ACTION,
+            HHOOK, IsIconic, IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED,
+            MSLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+            WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
         },
     },
     core::{BOOL, w},
 };
 
 use crate::{
-    is_invisible_win10_background_app_window,
+    Events, is_invisible_win10_background_app_window,
     platform::windows::models::{FullscreenOcclusionData, MonitorInfo, WindowsPlatform},
 };
 
@@ -141,4 +146,106 @@ pub extern "system" fn monitor_enum_proc(
         monitor_vector.push(current_monitor_info);
     }
     TRUE
+}
+
+thread_local! {
+    pub static MOUSE_TX: RefCell<Option<Sender<Events>>> =
+        RefCell::new(None);
+}
+pub unsafe extern "system" fn mouse_hook(n_code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    if n_code >= HC_ACTION as i32 {
+        let (x, y, delta) = unsafe {
+            let info = &*(l_param.0 as *const MSLLHOOKSTRUCT);
+
+            if info.flags & LLMHF_INJECTED != 0 {
+                return CallNextHookEx(Some(HHOOK::default()), n_code, w_param, l_param);
+            }
+
+            (info.pt.x, info.pt.y, (info.mouseData >> 16) as i16)
+        };
+
+        let event = match w_param.0 as u32 {
+            WM_MOUSEMOVE => Some(Events::Move { x, y }),
+
+            WM_LBUTTONDOWN => Some(Events::LeftDown { x, y }),
+
+            WM_LBUTTONUP => Some(Events::LeftUp { x, y }),
+
+            WM_RBUTTONDOWN => Some(Events::RightDown { x, y }),
+
+            WM_RBUTTONUP => Some(Events::RightUp { x, y }),
+
+            WM_MBUTTONDOWN => Some(Events::MiddleDown { x, y }),
+
+            WM_MBUTTONUP => Some(Events::MiddleUp { x, y }),
+
+            WM_MOUSEWHEEL => {
+                if delta != 0 {
+                    Some(Events::Scroll { x, y, delta })
+                } else {
+                    None
+                }
+            }
+
+            _ => None,
+        };
+
+        if let Some(ev) = event {
+            MOUSE_TX.with(|tx| {
+                if let Some(tx) = tx.borrow().as_ref() {
+                    let _ = tx.send(ev);
+                }
+            });
+        }
+    }
+
+    unsafe { CallNextHookEx(Some(HHOOK::default()), n_code, w_param, l_param) }
+}
+
+pub unsafe extern "system" fn keyboard_hook(
+    n_code: i32,
+    w_param: WPARAM,
+    l_param: LPARAM,
+) -> LRESULT {
+    if n_code >= HC_ACTION as i32 {
+        let info = unsafe { &*(l_param.0 as *const KBDLLHOOKSTRUCT) };
+
+        if info.flags.0 & LLKHF_INJECTED.0 != 0 {
+            return unsafe {
+                CallNextHookEx(
+                    Some(windows::Win32::UI::WindowsAndMessaging::HHOOK::default()),
+                    n_code,
+                    w_param,
+                    l_param,
+                )
+            };
+        }
+
+        let vk = info.vkCode;
+
+        let event = match w_param.0 as u32 {
+            WM_KEYDOWN => Some(Events::KeyDown { vk }),
+
+            WM_KEYUP => Some(Events::KeyUp { vk }),
+
+            _ => None,
+        };
+
+        if let Some(ev) = event {
+            MOUSE_TX.with(|tx| {
+                if let Some(tx) = tx.borrow().as_ref() {
+                    let _ = tx.send(ev);
+                }
+            });
+        }
+    }
+
+    unsafe {
+        CallNextHookEx(
+            Some(windows::Win32::UI::WindowsAndMessaging::HHOOK::default()),
+            n_code,
+            w_param,
+            l_param,
+        )
+    }
 }

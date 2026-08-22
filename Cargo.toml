@@ -26,4 +26,7 @@ tao = "0.34"
 macroquad = "0.4"
 miniquad = "0.4"
 
+[dependencies]
+chrono = "0.4.45"
+
 

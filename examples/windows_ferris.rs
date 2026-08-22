@@ -1,4 +1,4 @@
-use lumin_wallpaper_rs::{MouseForwarder, WindowsPlatform};
+use lumin_wallpaper_rs::{EventForwarder, WindowsPlatform};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -171,7 +171,7 @@ async fn main() {
     let mut flash_pos = Vec2::new(0.0, 0.0);
     let hwnd = get_hwnd().unwrap();
 
-    let a = MouseForwarder::new(hwnd.0 as _, false);
+    let a = EventForwarder::new(hwnd.0 as _, false, true, false);
     a.unwrap().forward_events();
 
     // unsafe {
