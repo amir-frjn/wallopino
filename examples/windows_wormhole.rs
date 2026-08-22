@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // this part attaches it to desktop
     let hwnd = window.hwnd();
-    let _ = WindowsPlatform::auto_attach(hwnd)?;
+    let _ = WindowsPlatform::auto_attach(hwnd, false)?;
     //
 
     event_loop.run(move |event, _, control_flow| {

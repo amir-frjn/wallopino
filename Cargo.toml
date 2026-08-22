@@ -23,6 +23,7 @@ windows = { version = "0.61", features = [
 [dev-dependencies]
 wry = "0.53"
 tao = "0.34"
-
+macroquad = "0.4"
+miniquad = "0.4"
 
 
