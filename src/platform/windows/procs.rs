@@ -5,8 +5,8 @@ use windows::{
         Foundation::{FALSE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM},
         Graphics::Gdi::{GetMonitorInfoW, HDC, HMONITOR, IntersectRect, MONITORINFOEXW},
         UI::WindowsAndMessaging::{
-            CallNextHookEx, FindWindowExW, GetClassNameW, GetShellWindow, GetWindowRect, HC_ACTION,
-            HHOOK, IsIconic, IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED,
+            CallNextHookEx, FindWindowExW, GetShellWindow, GetWindowRect, HC_ACTION, HHOOK,
+            IsIconic, IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED,
             MSLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
             WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
         },
@@ -15,15 +15,9 @@ use windows::{
 };
 
 use crate::{
-    Events, is_invisible_win10_background_app_window,
-    platform::windows::models::{FullscreenOcclusionData, MonitorInfo, WindowsPlatform},
+    Events, class_name, is_invisible_win10_background_app_window,
+    platform::windows::core::{FullscreenOcclusionData, MonitorInfo, WindowsPlatform},
 };
-
-fn class_name(hwnd: HWND) -> String {
-    let mut buffer = [0_u16; 256];
-    let len = unsafe { GetClassNameW(hwnd, &mut buffer) } as usize;
-    String::from_utf16_lossy(&buffer[..len])
-}
 
 pub extern "system" fn fullscreen_window_enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
@@ -92,7 +86,6 @@ pub extern "system" fn fullscreen_window_enum_proc(hwnd: HWND, lparam: LPARAM) -
 // To avoid using global variable we pass them as a WindowsPlatform via lparam
 pub extern "system" fn enum_windows_proc(window_handle: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
-        // println!("here");
         // Look for a child window named "SHELLDLL_DefView" in each top-level window.
         if let Ok(shell_view_window) =
             FindWindowExW(window_handle.into(), None, w!("SHELLDLL_DefView"), None)

@@ -78,6 +78,8 @@
 //! - [`WindowsPlatform`] – Main struct for platform operations
 //! - [`MonitorInfo`] – Display monitor information
 //! - [`Vector2Platform`] – 2D vector for mouse position
+use std::time::Duration;
+
 use windows::{
     Win32::{
         Foundation::{COLORREF, CloseHandle, HANDLE, HWND, LPARAM, POINT, RECT, WPARAM},
@@ -103,7 +105,10 @@ use windows::{
     core::{Error as WinErr, w},
 };
 
-use crate::platform::windows::procs::{enum_windows_proc, monitor_enum_proc};
+use crate::{
+    has_workerw_between,
+    platform::windows::procs::{enum_windows_proc, monitor_enum_proc},
+};
 
 // use crate::platform::windows::procs::monitor_enum_proc;
 
@@ -227,7 +232,6 @@ impl WindowsPlatform {
 
             if windows_platform.workerw_window_handle.is_none() {
                 windows_platform.is_pre_24h2 = true;
-
                 EnumWindows(
                     Some(enum_windows_proc),
                     LPARAM(&mut windows_platform as *mut _ as _),
@@ -263,6 +267,7 @@ impl WindowsPlatform {
     /// Returns an error if any of the initialization, monitor retrieval, or configuration steps fail.
     pub fn auto_attach(hwnd: isize, static_edge_mode: bool) -> Result<Self, WinErr> {
         let mut window_platform = Self::initialize()?;
+        println!("{:?}", window_platform);
         let monitor = window_platform.get_wallpaper_target(None)?;
         window_platform.configure_wallpaper_window(hwnd, &monitor, static_edge_mode)?;
         Ok(window_platform)
@@ -426,6 +431,10 @@ impl WindowsPlatform {
         Ok(())
     }
 
+    fn set_parent(child: HWND, parent: HWND) -> Result<(), WinErr> {
+        unsafe { SetParent(child, Some(parent))? };
+        Ok(())
+    }
     /// Retrieves the target monitor information for wallpaper placement.
     ///
     /// This method determines which monitor should be used for the wallpaper window based on
@@ -560,6 +569,37 @@ impl WindowsPlatform {
         Ok(monitor_info_vector)
     }
 
+    pub fn start_watcher(&self, wathcer_delay: Duration) -> Result<(), &str> {
+        let shell_def_view = self.shell_view_window_handle.unwrap().0 as isize;
+        let engine = self.engine_window_handle.unwrap().0 as isize;
+        let parent = if self.is_pre_24h2 {
+            self.workerw_window_handle.unwrap().0 as isize
+        } else {
+            self.progman_window_handle.unwrap().0 as isize
+        };
+
+        println!("engine: {:x}, shell: {:x}", engine, shell_def_view);
+        std::thread::spawn(move || {
+            let mut previous = has_workerw_between(shell_def_view, engine);
+            let engine_hwnd = HWND(engine as _);
+            let parent_hwnd = HWND(parent as _);
+
+            loop {
+                std::thread::sleep(wathcer_delay);
+
+                let current = has_workerw_between(shell_def_view, engine);
+
+                if current != previous {
+                    println!("hell yeah");
+                    Self::set_parent(engine_hwnd, parent_hwnd).unwrap();
+
+                    previous = current;
+                }
+            }
+        });
+
+        Ok(())
+    }
     /// Retrieves the current mouse cursor position relative to the desktop.
     ///
     /// This method attempts to get the cursor position using platform-specific APIs.

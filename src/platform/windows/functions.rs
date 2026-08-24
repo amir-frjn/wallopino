@@ -18,7 +18,7 @@ use windows::{
 };
 
 use crate::platform::windows::{
-    models::{DesktopHandle, FullscreenOcclusionData, Handle, MonitorInfo, WindowsPlatform},
+    core::{DesktopHandle, FullscreenOcclusionData, Handle, MonitorInfo, WindowsPlatform},
     procs::fullscreen_window_enum_proc,
 };
 
@@ -427,4 +427,39 @@ fn is_secure_desktop() -> bool {
         // _wcsicmp(name.data(), L"Default") != 0
         !name.trim_end_matches('\0').eq_ignore_ascii_case("Default")
     }
+}
+
+pub fn has_workerw_between(shell_def_view: isize, target: isize) -> bool {
+    let shell_def_view = HWND(shell_def_view as _);
+    let target = HWND(target as _);
+    let mut current = target;
+
+    println!("engine: {:?}, shell: {:?}", target, shell_def_view);
+    unsafe {
+        loop {
+            let previous = match GetWindow(current, GW_HWNDPREV) {
+                Ok(hwnd) => hwnd,
+                Err(_) => return false,
+            };
+            // We reached SHELLDLL_DefView without seeing WorkerW.
+            if previous == shell_def_view {
+                return false;
+            }
+
+            let class_name = class_name(previous);
+            println!("{}", class_name);
+            if class_name == "WorkerW" {
+                println!("baaa");
+                return true;
+            }
+
+            current = previous;
+        }
+    }
+}
+
+pub fn class_name(hwnd: HWND) -> String {
+    let mut buffer = [0_u16; 256];
+    let len = unsafe { GetClassNameW(hwnd, &mut buffer) } as usize;
+    String::from_utf16_lossy(&buffer[..len])
 }

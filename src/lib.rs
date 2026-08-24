@@ -43,7 +43,7 @@
 mod platform;
 
 #[cfg(target_os = "windows")]
-pub use platform::windows::functions::*;
+pub use platform::windows::core::{MonitorInfo, Vector2Platform, WindowsPlatform};
 #[cfg(target_os = "windows")]
-pub use platform::windows::models::{MonitorInfo, Vector2Platform, WindowsPlatform};
+pub use platform::windows::functions::*;
 pub use platform::windows::mouse::*;
