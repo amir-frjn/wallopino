@@ -1,16 +1,15 @@
 //! Windows platform implementation for wallpaper engine functionality.
 //!
-//! This module provides Windows-specific implementations for managing desktop wallpaper
-//! windows, monitor enumeration, mouse input handling, and system integration.
+//! This module provides Windows-specific implementations to set a HWND as desktop wallpaper.
 //!
 //! # Overview
 //!
-//! The core functionality is provided by [`WindowsPlatform`], which handles:
+//! The core functionality is provided by [`AttachWindow`], which handles:
 //! - Discovering the Windows desktop window hierarchy (`Progman`, `WorkerW`, `SHELLDLL_DefView`)
 //! - Attaching and configuring windows as wallpapers
 //! - Multi-monitor support with coordinate normalization
-//! - Mouse input state tracking (press, release, hold detection)
 //! - Cleanup and wallpaper restoration
+//! - Monitoring z-order changes that cause the engine to be hidden behind the desktop background and restoring its correct position.
 //!
 //! # Platform Support
 //!
@@ -24,22 +23,27 @@
 //! # use windows::Win32::Foundation::HWND;
 //! # use windows::core::Error;
 //! # fn example(hwnd: HWND) -> Result<(), Error> {
-//! use crate::platform::windows::WindowsPlatform;
+//! use crate::platform::windows::AttachWindow;
 //!
 //! // Initialize the platform
-//! let mut platform = WindowsPlatform::initialize()?;
+//! let mut platform = AttachWindow::initialize()?;
 //!
 //! // Get target monitor (virtual desktop or specific monitor)
 //! let monitor = platform.get_wallpaper_target(None)?;
 //!
 //! // Configure the window as wallpaper
-//! platform.configure_wallpaper_window(hwnd, &monitor)?;
+//! platform.configure_wallpaper_window(hwnd, &monitor, false)?;
 //!
 //! // Update mouse state each frame
-//! platform.update_mouse_state();
-//! if platform.is_mouse_button_pressed(0) {
-//!     // Handle left click
-//! }
+//!
+//!
+//! // These steps can simply done using:
+//! let mut platform = AttachWindow::auto_attach(hwnd)?;
+//!
+//! // Watch for z-order changes that cause hiding and restore it automatically
+//! platform.start_watcher(std::time::Duration::from_millis(100));
+//!
+//!/*... */
 //!
 //! // Cleanup on shutdown
 //! platform.cleanup()?;
@@ -57,6 +61,10 @@
 //! This module navigates this hierarchy to inject custom wallpaper windows at the
 //! correct Z-order position (below icons, above the static wallpaper).
 //!
+//! For monitoring, it spawns a thread that checks whether a `WorkerW` window
+//! exists between our engine and `SHELLDLL_DefView`. If one is found, the engine
+//! needs to be reattached.
+//!
 //! # Features
 //!
 //! - ✅ Full multi-monitor support
@@ -65,6 +73,7 @@
 //! - ✅ Edge-triggered and state-triggered mouse events
 //! - ✅ Automatic DPI awareness
 //! - ✅ Graceful handling of Windows version differences
+//! - ✅ Automatic z-order monitoring and recovery
 //!
 //! # Safety
 //!
@@ -75,10 +84,18 @@
 //!
 //! # See Also
 //!
-//! - [`WindowsPlatform`] – Main struct for platform operations
+//! - [`AttachWindow`] – Main struct for platform operations
 //! - [`MonitorInfo`] – Display monitor information
 //! - [`Vector2Platform`] – 2D vector for mouse position
-use std::time::Duration;
+use std::{
+    error::Error,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::JoinHandle,
+    time::Duration,
+};
 
 use windows::{
     Win32::{
@@ -110,12 +127,10 @@ use crate::{
     platform::windows::procs::{enum_windows_proc, monitor_enum_proc},
 };
 
-// use crate::platform::windows::procs::monitor_enum_proc;
-
 // To avoid using static global variables we use this structure to store them
 // and pass it to fucntions as a refrence
 #[derive(Default, Debug)]
-pub struct WindowsPlatform {
+pub struct AttachWindow {
     // Global variables to hold handles within the desktop hierarchy
     // g_progmanWindowHandle : top level Program Manager window
     // g_workerWindowHandle  : child WorkerW window rendering the static wallpaper
@@ -140,18 +155,12 @@ pub struct WindowsPlatform {
     pub previous_mouse_state: [bool; 5],
 
     pub is_pre_24h2: bool,
+
+    // This is to send kill signal to watcher thread if exist
+    watcher_kill_flag: Option<Arc<AtomicBool>>,
+    join_handle: Option<JoinHandle<Result<(), WinErr>>>,
 }
-impl WindowsPlatform {
-    /// Returns the y cooridiate of mouse (relative cursor position)
-    pub fn get_mouse_y(&self) -> i32 {
-        let mut p = POINT::default();
-
-        if self.get_relative_cursor_pos(&mut p).is_ok() {
-            return p.y;
-        }
-        0
-    }
-
+impl AttachWindow {
     /// Initializes the platform-specific state required to attach a window to the background.
     ///
     /// This method performs essential setup steps to locate the Windows desktop window hierarchy:
@@ -161,7 +170,7 @@ impl WindowsPlatform {
     /// - Sends a `0x052C` message to `Progman` to force creation of a `WorkerW` container window.
     /// - Attempts to find the `SHELLDLL_DefView` (desktop icons view) and `WorkerW` windows as
     ///   direct children of `Progman`.
-    /// - If `WorkerW` is not found, falls back to enumerating all windows via `EnumWindows` to
+    /// - If `WorkerW` is not found, falls AttachWindow to enumerating all windows via `EnumWindows` to
     ///   locate it (used for pre-Windows 24H2 systems).
     ///
     /// # Returns
@@ -171,7 +180,7 @@ impl WindowsPlatform {
     /// # Errors
     /// This function will return an error if:
     /// - The `Progman` window cannot be found.
-    /// - The `EnumWindows` call fails (when fallback is needed).
+    /// - The `EnumWindows` call fails (when fallAttachWindow is needed).
     /// - The `WorkerW` window cannot be located after all attempts.
     ///
     /// # Platform Support
@@ -184,19 +193,16 @@ impl WindowsPlatform {
     /// # Example
     /// ```
     /// let hwnd = HEWND::new();
-    /// let mut window_platform = WindowsPlatform::initialize()?;
+    /// let mut window_platform = AttachWindow::initialize()?;
     /// let monitor = window_platform.get_wallpaper_target(None)?;
     /// window_platform.configure_wallpaper_window(hwnd, &monitor)?;
-    ///
+    ///```
     pub fn initialize() -> Result<Self, WinErr> {
         let mut windows_platform = Self::default();
         unsafe {
             // Set the process DPI awareness to get physical pixel coordinates.
             // This must be done before any windows are created.
-            let dpi_awareness_result = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-            if dpi_awareness_result.is_err() {
-                // Continue if needed, but coordinate values may be scaled.
-            }
+            let _ = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 
             // Locate the Progman window (the desktop window)
             windows_platform.progman_window_handle = Some(FindWindowW(w!("Progman"), None)?);
@@ -244,34 +250,6 @@ impl WindowsPlatform {
         Ok(windows_platform)
     }
 
-    // Automatically attaches the standard window handle (isize pointer) to the background.
-    ///
-    /// This method performs the following steps in sequence:
-    /// 1. Initializes the platform backend via [`Self::initialize`].
-    /// 2. Retrieves the wallpaper target monitor using [`get_wallpaper_target`] with `None`.
-    /// 3. Configures the wallpaper window with the provided handle and monitor using [`configure_wallpaper_window`].
-    ///```rust
-    /// let mut window_platform = Self::initialize()?;
-    /// let monitor = window_platform.get_wallpaper_target(None)?;
-    /// window_platform.configure_wallpaper_window(hwnd, &monitor)?;
-    /// Ok(window_platform)
-    /// ```
-    ///
-    /// # Example
-    /// ```rust
-    /// let mut platform = Self::auto_attach(hwnd: isize)?;
-    ///
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an error if any of the initialization, monitor retrieval, or configuration steps fail.
-    pub fn auto_attach(hwnd: isize, static_edge_mode: bool) -> Result<Self, WinErr> {
-        let mut window_platform = Self::initialize()?;
-        let monitor = window_platform.get_wallpaper_target(None)?;
-        window_platform.configure_wallpaper_window(hwnd, &monitor, static_edge_mode)?;
-        Ok(window_platform)
-    }
-
     /// Configures the wallpaper window by attaching it to the desktop background with proper styling and positioning.
     ///
     /// This method performs platform-specific window configuration to embed the provided window handle
@@ -284,7 +262,7 @@ impl WindowsPlatform {
     /// - Positions the window below the desktop icons but above the system wallpaper using Z-order adjustments.
     ///
     /// ## Pre-Windows 24H2
-    /// - Reparents the window to the `WorkerW` container window.
+    /// - Re-parents the window to the `WorkerW` container window.
     /// - Removes title bar and border styles, applies `WS_CHILD` style.
     /// - This places the window behind desktop icons while maintaining proper layering.
     ///
@@ -295,7 +273,7 @@ impl WindowsPlatform {
     ///   detach from the desktop background when they receive mouse-click events. To prevent
     ///   this behavior, enable this flag to add the `WS_EX_STATICEDGE` style to the HWND.
     ///   However, `WS_EX_STATICEDGE` adds a visible border around the window, to prevent this
-    ///   side effect it will be zommed
+    ///   side effect it will be zoomed
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or a [`windows::core::Error`] (Win32 error) if any operation fails.
@@ -321,9 +299,9 @@ impl WindowsPlatform {
     ///
     /// # Example
     /// ```
-    /// let mut platform = WindowsPlatform::initialize()?;
+    /// let mut platform = AttachWindow::initialize()?;
     /// let monitor = platform.get_wallpaper_target(None)?;
-    /// platform.configure_wallpaper_window(hwnd, &monitor)?;
+    /// platform.configure_wallpaper_window(hwnd, &monitor, false)?;
     /// ```
     pub fn configure_wallpaper_window(
         &mut self,
@@ -341,7 +319,7 @@ impl WindowsPlatform {
 
         unsafe {
             if self.is_pre_24h2 {
-                // Reparent the window to the custom WorkerW window.
+                // Re-parent the window to the custom WorkerW window.
                 // This attaches the window as a child of your WorkerW,
                 // which should place it behind desktop icons if your WorkerW is set up that way.
                 SetParent(hwnd, self.workerw_window_handle)?;
@@ -362,7 +340,7 @@ impl WindowsPlatform {
                 let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 ex_style |= WS_EX_LAYERED.0 as isize; // Make it a layered window for 24h2
 
-                // Prevents the window from detaching when clicked, but adds a border.
+                // Prevents the window from detaching when clicked (in some cases), but adds a border.
                 if static_edge_mode {
                     ex_style |= WS_EX_STATICEDGE.0 as isize;
                 }
@@ -403,7 +381,9 @@ impl WindowsPlatform {
 
             // Resize/reposition the engine window to match its new parent.
             // g_progmanWindowHandle spans the entire virtual desktop in modern builds
+
             let (edge_x, edge_y) = if static_edge_mode {
+                // `WS_EX_STATICEDGE` adds borders, so we zoom in by the border thickness to mask them.
                 (GetSystemMetrics(SM_CXEDGE), GetSystemMetrics(SM_CYEDGE))
             } else {
                 (0, 0)
@@ -430,6 +410,7 @@ impl WindowsPlatform {
         Ok(())
     }
 
+    #[inline]
     fn set_parent(child: HWND, parent: HWND) -> Result<(), WinErr> {
         unsafe { SetParent(child, Some(parent))? };
         Ok(())
@@ -454,14 +435,14 @@ impl WindowsPlatform {
     /// # Errors
     /// This function will return an error if:
     /// - The monitor enumeration via [`Self::enumerate_monitors`] fails.
-    /// - The provided index is out of bounds (handled by falling back to virtual desktop).
+    /// - The provided index is out of bounds (handled by falling AttachWindow to virtual desktop).
     ///
     /// # Behavior Details
     /// - If `monitor_index` is `None` or `-1`, the function returns the virtual screen dimensions
     ///   (the bounding rectangle of all monitors combined).
     /// - If a valid index is provided, the function returns the cloned `MonitorInfo` for that
     ///   specific monitor.
-    /// - Invalid indices (out of range) also fall back to the virtual desktop dimensions.
+    /// - Invalid indices (out of range) also fall AttachWindow to the virtual desktop dimensions.
     ///
     /// # Platform Support
     /// This function is Windows-specific and relies on `GetSystemMetrics` for virtual desktop
@@ -473,7 +454,7 @@ impl WindowsPlatform {
     ///
     /// # Example
     /// ```
-    /// let mut platform = WindowsPlatform::initialize()?;
+    /// let mut platform = AttachWindow::initialize()?;
     ///
     /// // Get the first monitor
     /// let primary_monitor = platform.get_wallpaper_target(Some(0))?;
@@ -502,6 +483,35 @@ impl WindowsPlatform {
         }
     }
 
+    // Automatically attaches the standard window handle (isize pointer) to the background.
+    ///
+    /// This method performs the following steps in sequence:
+    /// 1. Initializes the platform AttachWindowend via [`Self::initialize`].
+    /// 2. Retrieves the wallpaper target monitor using [`get_wallpaper_target`] with `None`.
+    /// 3. Configures the wallpaper window with the provided handle and monitor using [`configure_wallpaper_window`].
+    /// in other mean it does:
+    ///```rust
+    /// let mut window_platform = Self::initialize()?;
+    /// let monitor = window_platform.get_wallpaper_target(None)?;
+    /// window_platform.configure_wallpaper_window(hwnd, &monitor)?;
+    /// Ok(window_platform)
+    /// ```
+    ///
+    /// # Example
+    /// ```rust
+    /// let mut platform = Self::auto_attach(hwnd: isize)?;
+    ///
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an error if any of the initialization, monitor retrieval, or configuration steps fail.
+    pub fn auto_attach(hwnd: isize, static_edge_mode: bool) -> Result<Self, WinErr> {
+        let mut window_platform = Self::initialize()?;
+        let monitor = window_platform.get_wallpaper_target(None)?;
+        window_platform.configure_wallpaper_window(hwnd, &monitor, static_edge_mode)?;
+        Ok(window_platform)
+    }
+
     /// Enumerates all display monitors connected to the system.
     ///
     /// This method retrieves information about all available monitors using the Windows
@@ -509,7 +519,7 @@ impl WindowsPlatform {
     /// desktop coordinate system starting at `(0, 0)`.
     ///
     /// # Process
-    /// 1. Calls `EnumDisplayMonitors` to collect monitor information via a callback.
+    /// 1. Calls `EnumDisplayMonitors` to collect monitor information via a callAttachWindow.
     /// 2. Determines the minimum `x` and `y` coordinates across all monitors to find the
     ///    virtual desktop origin.
     /// 3. Subtracts the origin offset from each monitor's position, resulting in coordinates
@@ -533,12 +543,12 @@ impl WindowsPlatform {
     ///
     /// # Safety
     /// This function contains an `unsafe` block for the `EnumDisplayMonitors` API call.
-    /// The callback function (`monitor_enum_proc`) must be implemented correctly and
+    /// The callAttachWindow function (`monitor_enum_proc`) must be implemented correctly and
     /// handle the pointer to the vector safely.
     ///
     /// # Example
     /// ```
-    /// let mut platform = WindowsPlatform::initialize()?;
+    /// let mut platform = AttachWindow::initialize()?;
     /// let monitors = platform.enumerate_monitors()?;
     ///
     /// for (i, monitor) in monitors.iter().enumerate() {
@@ -551,7 +561,7 @@ impl WindowsPlatform {
         let lparam = LPARAM(&mut monitor_info_vector as *mut Vec<MonitorInfo> as isize);
         unsafe { EnumDisplayMonitors(None, None, Some(monitor_enum_proc), lparam).ok()? };
 
-        // Convert to desktop coodrdinates starting at 0, 0
+        // Convert to desktop coordinates starting at 0, 0
         self.desktop_x = i32::MAX;
         self.desktop_y = i32::MAX;
 
@@ -568,7 +578,26 @@ impl WindowsPlatform {
         Ok(monitor_info_vector)
     }
 
-    pub fn start_watcher(&self, wathcer_delay: Duration) -> Result<(), &str> {
+    /// Spawns a background thread to monitor and maintain the Z-order of the wallpaper window.
+    ///
+    /// Periodically checks if a `WorkerW` window has been replaced between the desktop
+    /// icons (`SHELLDLL_DefView`) and the engine window. If detected, it automatically
+    /// reparents the engine window to restore proper layering.
+    ///
+    /// This is necessary on Windows 24H2+ where the system (e.g. virtual desktop switch and switch user)
+    ///  may dynamically replaces `WorkerW` windows into the desktop hierarchy.
+    ///
+    /// # Parameters
+    /// - `watcher_delay`: Duration between each Z-order check.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or an error if required window handles are missing.
+    pub fn start_watcher(&mut self, wathcer_delay: Duration) -> Result<(), &str> {
+        if self.join_handle.is_some() {
+            return Err("another watcher is working");
+        }
+
+        // Convert HWNDs to isize to bypass the Rust compiler error about passing `*mut c_void` to a thread.
         let shell_def_view = self.shell_view_window_handle.unwrap().0 as isize;
         let engine = self.engine_window_handle.unwrap().0 as isize;
         let parent = if self.is_pre_24h2 {
@@ -577,27 +606,34 @@ impl WindowsPlatform {
             self.progman_window_handle.unwrap().0 as isize
         };
 
-        // println!("engine: {:x}, shell: {:x}", engine, shell_def_view);
-        std::thread::spawn(move || {
+        let kill_flag = Arc::new(AtomicBool::new(false));
+        self.watcher_kill_flag = Some(kill_flag.clone());
+
+        let join_handle = std::thread::spawn(move || -> Result<(), WinErr> {
             let mut previous = has_workerw_between(shell_def_view, engine);
             let engine_hwnd = HWND(engine as _);
             let parent_hwnd = HWND(parent as _);
 
-            loop {
+            while !kill_flag.load(Ordering::Acquire) {
                 std::thread::sleep(wathcer_delay);
 
+                // check is there a workerW between SHEL_DefView
                 let current = has_workerw_between(shell_def_view, engine);
 
+                // if yes the engine must be reparent
                 if current != previous {
-                    Self::set_parent(engine_hwnd, parent_hwnd).unwrap();
+                    Self::set_parent(engine_hwnd, parent_hwnd)?;
 
                     previous = current;
                 }
             }
+            Ok(())
         });
+        self.join_handle = Some(join_handle);
 
         Ok(())
     }
+
     /// Retrieves the current mouse cursor position relative to the desktop.
     ///
     /// This method attempts to get the cursor position using platform-specific APIs.
@@ -623,7 +659,7 @@ impl WindowsPlatform {
     ///
     /// # Example
     /// ```
-    /// let platform = WindowsPlatform::initialize()?;
+    /// let platform = AttachWindow::initialize()?;
     /// let cursor_pos = platform.get_mouse_position();
     /// println!("Mouse is at: ({}, {})", cursor_pos.x, cursor_pos.y);
     /// ```
@@ -657,7 +693,7 @@ impl WindowsPlatform {
     /// | 0     | Left          |
     /// | 1     | Right         |
     /// | 2     | Middle        |
-    /// | 3     | X1 (Back)     |
+    /// | 3     | X1 (AttachWindow)     |
     /// | 4     | X2 (Forward)  |
     ///
     /// # Returns
@@ -681,7 +717,7 @@ impl WindowsPlatform {
     /// | 0     | Left          |
     /// | 1     | Right         |
     /// | 2     | Middle        |
-    /// | 3     | X1 (Back)     |
+    /// | 3     | X1 (AttachWindow)     |
     /// | 4     | X2 (Forward)  |
     ///
     /// # Returns
@@ -705,7 +741,7 @@ impl WindowsPlatform {
     /// | 0     | Left          |
     /// | 1     | Right         |
     /// | 2     | Middle        |
-    /// | 3     | X1 (Back)     |
+    /// | 3     | X1 (AttachWindow)     |
     /// | 4     | X2 (Forward)  |
     ///
     /// # Returns
@@ -728,7 +764,7 @@ impl WindowsPlatform {
     /// | 0     | Left          |
     /// | 1     | Right         |
     /// | 2     | Middle        |
-    /// | 3     | X1 (Back)     |
+    /// | 3     | X1 (AttachWindow)     |
     /// | 4     | X2 (Forward)  |
     ///
     /// # Returns
@@ -750,21 +786,77 @@ impl WindowsPlatform {
         0
     }
 
+    /// Returns the y cooridiate of mouse (relative cursor position)
+    pub fn get_mouse_y(&self) -> i32 {
+        let mut p = POINT::default();
+
+        if self.get_relative_cursor_pos(&mut p).is_ok() {
+            return p.y;
+        }
+        0
+    }
+
     fn get_relative_cursor_pos(&self, p: &mut POINT) -> Result<(), WinErr> {
         unsafe { GetCursorPos(p)? }
 
-        // // Convert to desktop coordinates
-        // p.x -= self.desktop_x;
-        // p.y -= self.desktop_y;
+        // Convert to desktop coordinates
+        p.x -= self.desktop_x;
+        p.y -= self.desktop_y;
 
-        // // Convert to window coordinates
-        // let selected_monitor = self.selected_monitor.as_ref().ok_or(WinErr::empty())?;
-        // p.x -= selected_monitor.x;
-        // p.y -= selected_monitor.y;
+        // Convert to window coordinates
+        let selected_monitor = self.selected_monitor.as_ref().ok_or(WinErr::empty())?;
+        p.x -= selected_monitor.x;
+        p.y -= selected_monitor.y;
 
         Ok(())
     }
 
+    /// Stops the background watcher thread that monitors Z-order changes.
+    ///
+    /// This function sends a kill signal to the watcher thread and waits for it to
+    /// terminate gracefully. It should be called during cleanup or when you no longer
+    /// need Z-order monitoring.
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if the watcher thread was successfully stopped, or an error if:
+    /// - The watcher was not started (returns `Err("Watcher has not yet started")`).
+    /// - The thread panicked or encountered an error during shutdown.
+    ///
+    /// # Behavior
+    /// 1. Sets the kill flag to signal the watcher thread to exit.
+    /// 2. Waits for the thread to finish using `join()`.
+    /// 3. Clears the internal kill flag and join handle.
+    ///
+    /// # Notes
+    /// - This is automatically called by `cleanup()`.
+    /// - If the watcher thread is not running, this function returns an error.
+    /// - The function blocks until the watcher thread exits.
+    ///
+    /// # Example
+    /// ```
+    /// let mut platform = AttachWindow::initialize()?;
+    /// platform.start_watcher(Duration::from_millis(100))?;
+    ///
+    /// // ... later ...
+    ///
+    /// platform.s
+    pub fn stop_watcher(&mut self) -> Result<(), Box<dyn Error>> {
+        if let Some(kill_flag) = &self.watcher_kill_flag {
+            kill_flag.store(true, Ordering::Release);
+
+            self.watcher_kill_flag = None;
+
+            self.join_handle
+                .take()
+                .unwrap()
+                .join()
+                .map_err(|_| "Watcher thread panicked")??;
+
+            Ok(())
+        } else {
+            Err("Watcher has not yet started".into())
+        }
+    }
     /// Cleans up the platform state and restores the desktop wallpaper.
     ///
     /// This method performs cleanup operations when the wallpaper engine is shutting down.
@@ -803,13 +895,20 @@ impl WindowsPlatform {
     ///
     /// # Example
     /// ```
-    /// let mut platform = WindowsPlatform::initialize()?;
+    /// let mut platform = AttachWindow::initialize()?;
     /// // ... configure wallpaper ...
     ///
     /// // Clean up when shutting down
     /// platform.cleanup()?;
     /// ```
-    pub fn cleanup(&mut self) -> Result<(), WinErr> {
+    ///
+    pub fn cleanup(&mut self) -> Result<(), Box<dyn Error>> {
+        let watcher_error = if self.join_handle.is_some() {
+            self.stop_watcher()
+        } else {
+            Ok(())
+        };
+
         const MAX_PATH: u32 = 260_u32;
         if self.engine_window_handle.is_some() {
             // Restore the desktop wallpaper
@@ -838,7 +937,8 @@ impl WindowsPlatform {
         self.workerw_window_handle = None;
         self.shell_view_window_handle = None;
         self.engine_window_handle = None;
-        Ok(())
+
+        watcher_error
     }
 
     /// Captures the current mouse button states for the current frame.
@@ -890,6 +990,12 @@ fn get_virtual_key_for_mouse_button(button: usize) -> u16 {
         _ => 0,
     }
 }
+
+impl Drop for AttachWindow {
+    fn drop(&mut self) {
+        let _ = self.stop_watcher();
+    }
+}
 /// Represents display monitor information, including its full bounds and work area.
 ///
 /// This struct holds the position and dimensions of a physical display monitor,
@@ -916,7 +1022,7 @@ fn get_virtual_key_for_mouse_button(button: usize) -> u16 {
 ///
 /// # Example
 /// ```
-/// let mut platform = WindowsPlatform::initialize()?;
+/// let mut platform = AttachWindow::initialize()?;
 /// let monitors = platform.enumerate_monitors()?;
 ///
 /// for monitor in &monitors {
@@ -926,8 +1032,8 @@ fn get_virtual_key_for_mouse_button(button: usize) -> u16 {
 /// ```
 ///
 /// # See Also
-/// - [`enumerate_monitors`](crate::WindowsPlatform::enumerate_monitors) for retrieving a list of monitors.
-/// - [`get_wallpaper_target`](crate::WindowsPlatform::get_wallpaper_target) for selecting a monitor as wallpaper target.
+/// - [`enumerate_monitors`](crate::AttachWindow::enumerate_monitors) for retrieving a list of monitors.
+/// - [`get_wallpaper_target`](crate::AttachWindow::get_wallpaper_target) for selecting a monitor as wallpaper target.
 #[derive(Debug, Default, Clone)]
 pub struct MonitorInfo {
     pub x: i32, // X coordinate of the monitor's top-left corner
