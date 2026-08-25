@@ -11,6 +11,7 @@ fn window_conf() -> Conf {
     }
 }
 
+use macroquad::ui::Drag::No;
 use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::FindWindowW};
 use windows::core::w;
 
@@ -171,9 +172,8 @@ async fn main() {
     let mut flash_pos = Vec2::new(0.0, 0.0);
     let hwnd = get_hwnd().unwrap();
 
-    let a = EventForwarder::new(hwnd.0 as _, false, true, false);
-    a.unwrap().forward_events();
-
+    let click_forwarder = EventForwarder::new(hwnd.0 as _, None, true, false);
+    click_forwarder.unwrap().forward_events();
     // unsafe {
     //     let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 

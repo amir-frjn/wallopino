@@ -39,10 +39,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // this part attaches it to desktop
     let hwnd = window.hwnd();
-    println!("{:x}", hwnd);
-    let a = EventForwarder::new(hwnd, true, true, false);
-    let _ = a.unwrap().forward_events();
 
+    std::thread::spawn(move || {
+        let a = EventForwarder::new(hwnd, Some("Chrome_WidgetWin_1"), true, false);
+        let c = a.unwrap().forward_events().unwrap();
+        std::thread::sleep(Duration::from_secs(3));
+        c.pause();
+        println!("puase");
+        std::thread::sleep(Duration::from_secs(1));
+        c.resume();
+        println!("res");
+        std::thread::sleep(Duration::from_secs(1));
+
+        c.exit();
+    });
     let a = WindowsPlatform::auto_attach(hwnd, false).unwrap();
     a.start_watcher(Duration::from_millis(100)).unwrap();
 

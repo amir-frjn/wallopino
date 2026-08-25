@@ -267,7 +267,6 @@ impl WindowsPlatform {
     /// Returns an error if any of the initialization, monitor retrieval, or configuration steps fail.
     pub fn auto_attach(hwnd: isize, static_edge_mode: bool) -> Result<Self, WinErr> {
         let mut window_platform = Self::initialize()?;
-        println!("{:?}", window_platform);
         let monitor = window_platform.get_wallpaper_target(None)?;
         window_platform.configure_wallpaper_window(hwnd, &monitor, static_edge_mode)?;
         Ok(window_platform)
@@ -578,7 +577,7 @@ impl WindowsPlatform {
             self.progman_window_handle.unwrap().0 as isize
         };
 
-        println!("engine: {:x}, shell: {:x}", engine, shell_def_view);
+        // println!("engine: {:x}, shell: {:x}", engine, shell_def_view);
         std::thread::spawn(move || {
             let mut previous = has_workerw_between(shell_def_view, engine);
             let engine_hwnd = HWND(engine as _);
@@ -590,7 +589,6 @@ impl WindowsPlatform {
                 let current = has_workerw_between(shell_def_view, engine);
 
                 if current != previous {
-                    println!("hell yeah");
                     Self::set_parent(engine_hwnd, parent_hwnd).unwrap();
 
                     previous = current;

@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // this part attaches it to desktop
     let hwnd = window.hwnd();
     println!("{:x}", hwnd);
-    let a = EventForwarder::new(hwnd, true, true, false);
+    let a = EventForwarder::new(hwnd, Some("Chrome_WidgetWin_1"), true, false);
     a.unwrap().forward_events();
 
     let a = WindowsPlatform::auto_attach(hwnd, false).unwrap();

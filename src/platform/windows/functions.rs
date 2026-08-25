@@ -434,7 +434,6 @@ pub fn has_workerw_between(shell_def_view: isize, target: isize) -> bool {
     let target = HWND(target as _);
     let mut current = target;
 
-    println!("engine: {:?}, shell: {:?}", target, shell_def_view);
     unsafe {
         loop {
             let previous = match GetWindow(current, GW_HWNDPREV) {

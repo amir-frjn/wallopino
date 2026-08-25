@@ -1,4 +1,6 @@
 use std::{
+    error::Error,
+    process::exit,
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver},
@@ -21,7 +23,10 @@ use windows::{
     core::Error as WinErr,
 };
 
-use crate::platform::windows::procs::{MOUSE_TX, keyboard_hook, mouse_hook};
+use crate::{
+    class_name,
+    platform::windows::procs::{MOUSE_TX, keyboard_hook, mouse_hook},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Events {
@@ -38,56 +43,66 @@ pub enum Events {
 }
 
 #[derive(Debug)]
-pub struct ForwardingController(Arc<Mutex<bool>>);
+pub struct ForwardingController(Arc<Mutex<(bool, bool)>>);
 
 impl ForwardingController {
     pub fn pause(&self) {
-        *self.0.lock().unwrap() = false;
+        self.0.lock().unwrap().0 = false;
     }
 
     pub fn resume(&self) {
-        *self.0.lock().unwrap() = true;
+        self.0.lock().unwrap().0 = true;
     }
 
     pub fn is_resume(&self) -> bool {
-        *self.0.lock().unwrap()
+        self.0.lock().unwrap().0
+    }
+
+    pub fn exit(&self) {
+        self.0.lock().unwrap().1 = true
     }
 }
 
 #[derive(Debug)]
 pub struct EventForwarder {
-    hwnds: Vec<isize>,
+    hwnd: isize,
     button_state: u32,
-    event_pipeline: Receiver<Events>,
+    includes_mouse: bool,
+    includes_keyboard: bool,
 }
 
 impl EventForwarder {
     pub fn new(
-        hwnd: isize,
-        add_descendants: bool,
+        mut hwnd: isize,
+        descendants_target_classname: Option<&str>,
         includes_mouse: bool,
         includes_keyboard: bool,
     ) -> Result<Self, WinErr> {
-        let hwnds = if add_descendants {
-            inspect_window_tree(hwnd)
-        } else {
-            vec![hwnd]
-        };
+        if let Some(target) = descendants_target_classname {
+            hwnd = find_descendant_target(hwnd, target)
+                .ok_or(WinErr::empty())?
+                .0 as isize;
+        }
 
         Ok(Self {
-            hwnds,
+            hwnd,
             button_state: 0,
-            event_pipeline: start_input_hook(includes_mouse, includes_keyboard)?,
+            includes_keyboard,
+            includes_mouse,
         })
     }
 
     pub fn forward_events(mut self) -> Result<ForwardingController, WinErr> {
-        let is_resume = Arc::new(Mutex::new(true));
+        let is_resume = Arc::new(Mutex::new((true, false)));
         let controller = ForwardingController(is_resume.clone());
-
+        let rx = start_input_hook(self.includes_mouse, self.includes_keyboard)?;
         thread::spawn(move || {
-            while let Ok(event) = self.event_pipeline.recv() {
-                if *is_resume.lock().unwrap() {
+            while let Ok(event) = rx.recv() {
+                let guard = is_resume.lock().unwrap();
+                if guard.1 {
+                    return;
+                }
+                if guard.0 {
                     self.handle_events(event).unwrap();
                 }
             }
@@ -111,133 +126,132 @@ impl EventForwarder {
     }
 
     fn handle_events(&mut self, event: Events) -> Result<(), WinErr> {
-        for &hwnd_isize in &self.hwnds {
-            let hwnd = create_hwnd(hwnd_isize);
+        let hwnd_isize = self.hwnd;
+        let hwnd = HWND(hwnd_isize as _);
 
-            match event {
-                Events::Move { x, y } => {
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+        match event {
+            Events::Move { x, y } => {
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
 
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_MOUSEMOVE,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_MOUSEMOVE,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
                 }
-
-                Events::LeftDown { x, y } => {
-                    self.button_state |= MK_LBUTTON.0 as u32;
-
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_LBUTTONDOWN,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-                }
-
-                Events::LeftUp { x, y } => {
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_LBUTTONUP,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-
-                    self.button_state &= !(MK_LBUTTON.0 as u32);
-                }
-
-                Events::RightDown { x, y } => {
-                    self.button_state |= MK_RBUTTON.0 as u32;
-
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_RBUTTONDOWN,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-                }
-
-                Events::RightUp { x, y } => {
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_RBUTTONUP,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-
-                    self.button_state &= !(MK_RBUTTON.0 as u32);
-                }
-
-                Events::MiddleDown { x, y } => {
-                    self.button_state |= MK_MBUTTON.0 as u32;
-
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_MBUTTONDOWN,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-                }
-
-                Events::MiddleUp { x, y } => {
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    unsafe {
-                        PostMessageW(
-                            Some(hwnd),
-                            WM_MBUTTONUP,
-                            WPARAM(self.button_state as usize),
-                            lparam,
-                        )?;
-                    }
-
-                    self.button_state &= !(MK_MBUTTON.0 as u32);
-                }
-
-                Events::Scroll { x, y, delta } => {
-                    let lparam = Self::make_lparam(hwnd_isize, x, y)?;
-
-                    let wparam =
-                        WPARAM(((delta as u16 as usize) << 16) | self.button_state as usize);
-
-                    unsafe {
-                        PostMessageW(Some(hwnd), WM_MOUSEWHEEL, wparam, lparam)?;
-                    }
-                }
-
-                Events::KeyDown { vk } => unsafe {
-                    PostMessageW(Some(hwnd), WM_KEYDOWN, WPARAM(vk as usize), LPARAM(0))?;
-                },
-
-                Events::KeyUp { vk } => unsafe {
-                    PostMessageW(Some(hwnd), WM_KEYUP, WPARAM(vk as usize), LPARAM(0))?;
-                },
             }
+
+            Events::LeftDown { x, y } => {
+                self.button_state |= MK_LBUTTON.0 as u32;
+
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_LBUTTONDOWN,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+            }
+
+            Events::LeftUp { x, y } => {
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_LBUTTONUP,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+
+                self.button_state &= !(MK_LBUTTON.0 as u32);
+            }
+
+            Events::RightDown { x, y } => {
+                self.button_state |= MK_RBUTTON.0 as u32;
+
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_RBUTTONDOWN,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+            }
+
+            Events::RightUp { x, y } => {
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_RBUTTONUP,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+
+                self.button_state &= !(MK_RBUTTON.0 as u32);
+            }
+
+            Events::MiddleDown { x, y } => {
+                self.button_state |= MK_MBUTTON.0 as u32;
+
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_MBUTTONDOWN,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+            }
+
+            Events::MiddleUp { x, y } => {
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                unsafe {
+                    PostMessageW(
+                        Some(hwnd),
+                        WM_MBUTTONUP,
+                        WPARAM(self.button_state as usize),
+                        lparam,
+                    )?;
+                }
+
+                self.button_state &= !(MK_MBUTTON.0 as u32);
+            }
+
+            Events::Scroll { x, y, delta } => {
+                let lparam = Self::make_lparam(hwnd_isize, x, y)?;
+
+                let wparam = WPARAM(((delta as u16 as usize) << 16) | self.button_state as usize);
+
+                unsafe {
+                    PostMessageW(Some(hwnd), WM_MOUSEWHEEL, wparam, lparam)?;
+                }
+            }
+
+            Events::KeyDown { vk } => unsafe {
+                PostMessageW(Some(hwnd), WM_KEYDOWN, WPARAM(vk as usize), LPARAM(0))?;
+            },
+
+            Events::KeyUp { vk } => unsafe {
+                PostMessageW(Some(hwnd), WM_KEYUP, WPARAM(vk as usize), LPARAM(0))?;
+            },
         }
+
         Ok(())
     }
 }
@@ -300,25 +314,30 @@ fn start_input_hook(
     Ok(rx)
 }
 
-fn inspect_window_tree(hwnd: isize) -> Vec<isize> {
-    let mut hwnds = Vec::new();
-    dfs(HWND(hwnd as _), &mut hwnds);
-
-    hwnds
+fn find_descendant_target(hwnd: isize, descendant_target_name: &str) -> Option<HWND> {
+    dfs(HWND(hwnd as _), descendant_target_name)
 }
 
-fn dfs(hwnd: HWND, hwnds: &mut Vec<isize>) {
-    hwnds.push(hwnd.0 as isize);
+fn dfs(hwnd: HWND, target_name: &str) -> Option<HWND> {
+    let current_name = class_name(hwnd);
+
+    if current_name == target_name {
+        return Some(hwnd);
+    }
 
     unsafe {
         let mut child = GetWindow(hwnd, GW_CHILD);
 
         while let Ok(c) = child {
-            dfs(c, hwnds);
+            let result = dfs(c, target_name);
+            if result.is_some() {
+                return result;
+            }
 
             child = GetWindow(c, GW_HWNDNEXT);
         }
     }
+    None
 }
 
 #[inline]
