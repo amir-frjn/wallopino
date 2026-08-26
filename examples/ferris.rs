@@ -1,4 +1,4 @@
-use lumin_wallpaper_rs::{EventForwarder, WindowsPlatform};
+use lumin_wallpaper_rs::{AttachWindow, EventForwarder};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -11,7 +11,6 @@ fn window_conf() -> Conf {
     }
 }
 
-use macroquad::ui::Drag::No;
 use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::FindWindowW};
 use windows::core::w;
 
@@ -179,7 +178,9 @@ async fn main() {
 
     //     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | MA_NOACTIVATE as isize);
     // }
-    let _ = WindowsPlatform::auto_attach(hwnd.0 as _, true);
+    let a = AttachWindow::auto_attach(hwnd.0 as _, true);
+    a.unwrap()
+        .start_watcher(std::time::Duration::from_millis(100));
     loop {
         let dt = get_frame_time();
         let time = get_time();

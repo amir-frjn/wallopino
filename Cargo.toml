@@ -6,6 +6,7 @@ edition = "2024"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
+    "Win32_System_SystemServices",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
@@ -29,4 +30,6 @@ miniquad = "0.4"
 [dependencies]
 chrono = "0.4.45"
 
-
+[profile.dev]
+codegen-units = 256
+debug = 0

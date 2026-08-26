@@ -1,4 +1,7 @@
+// AI is used to generate documentation and comments for the code.
+
 //! Windows platform implementation for wallpaper engine functionality.
+//! This piece of code is inspired by LuminWallpaper library: https://github.com/jensroth-git/LuminWallpaper
 //!
 //! This module provides Windows-specific implementations to set a HWND as desktop wallpaper.
 //!
@@ -62,7 +65,7 @@
 //! correct Z-order position (below icons, above the static wallpaper).
 //!
 //! For monitoring, it spawns a thread that checks whether a `WorkerW` window
-//! exists between our engine and `SHELLDLL_DefView`. If one is found, the engine
+//! exists between our engine and `SHELLDLL_DefView`. If one is found, the engined
 //! needs to be reattached.
 //!
 //! # Features
@@ -1034,6 +1037,8 @@ impl Drop for AttachWindow {
 /// # See Also
 /// - [`enumerate_monitors`](crate::AttachWindow::enumerate_monitors) for retrieving a list of monitors.
 /// - [`get_wallpaper_target`](crate::AttachWindow::get_wallpaper_target) for selecting a monitor as wallpaper target.
+///
+///
 #[derive(Debug, Default, Clone)]
 pub struct MonitorInfo {
     pub x: i32, // X coordinate of the monitor's top-left corner
@@ -1049,13 +1054,14 @@ pub struct MonitorInfo {
     pub work_height: i32, // Work area height
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FullscreenOcclusionData {
     pub monitor: MonitorInfo,
     pub occluded_rects: Vec<RECT>,
 }
 
 // Vector2 structure to avoid engine dependency in this header
+#[derive(Debug, Default, Clone)]
 pub struct Vector2Platform {
     pub x: f32,
     pub y: f32,

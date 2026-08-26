@@ -1,4 +1,4 @@
-//! Cross-platform wallpaper engine library with Windows implementation.
+//! Wallpaper engine library with Windows implementation.
 //!
 //! This library provides platform-agnostic APIs for managing desktop wallpapers,
 //! with full Windows support for attaching windows to the desktop, monitor
@@ -9,8 +9,9 @@
 //! - Multi-monitor support with coordinate normalization
 //! - Fullscreen occlusion detection with configurable thresholds
 //! - System state detection (lock screen, UAC, secure desktop)
-//! - Mouse input tracking (5 buttons with edge detection)
+//! - Mouse and Keyboard events tracking
 //! - Automatic Windows version adaptation (24H2+ vs pre-24H2)
+//! - Watchdog to detect wallpaper z-order changes and fix that
 //!
 //! # Quick Example
 //! ```no_run
@@ -43,7 +44,7 @@
 mod platform;
 
 #[cfg(target_os = "windows")]
-pub use platform::windows::core::{MonitorInfo, Vector2Platform, WindowsPlatform};
+pub use platform::windows::core::{AttachWindow, MonitorInfo, Vector2Platform};
 #[cfg(target_os = "windows")]
 pub use platform::windows::functions::*;
 pub use platform::windows::mouse::*;

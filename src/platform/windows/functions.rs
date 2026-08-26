@@ -1,3 +1,6 @@
+// This piece of code is inspired by LuminWallpaper library: https://github.com/jensroth-git/LuminWallpaper
+// AI is used to generate documentation and comments for the code
+
 use windows::{
     Win32::{
         Foundation::*,
@@ -18,7 +21,7 @@ use windows::{
 };
 
 use crate::platform::windows::{
-    core::{DesktopHandle, FullscreenOcclusionData, Handle, MonitorInfo, WindowsPlatform},
+    core::{AttachWindow, DesktopHandle, FullscreenOcclusionData, Handle, MonitorInfo},
     procs::fullscreen_window_enum_proc,
 };
 
@@ -158,7 +161,7 @@ pub fn is_desktop_locked() -> bool {
 /// ```
 /// # use windows::core::Error;
 /// # fn example() -> Result<(), Error> {
-/// let mut platform = WindowsPlatform::initialize()?;
+/// let mut platform = AttachWindow::initialize()?;
 /// let monitor = platform.get_wallpaper_target(Some(0))?;
 ///
 /// // Check if monitor is at least 70% occluded
@@ -177,7 +180,7 @@ pub fn is_desktop_locked() -> bool {
 pub fn is_monitor_occluded(
     monitor: &MonitorInfo,
     threshold: f64,
-    global_variable: &mut WindowsPlatform,
+    global_variable: &mut AttachWindow,
 ) -> Result<bool, WinErr> {
     let mut occlusion_data = FullscreenOcclusionData::default();
     occlusion_data.monitor = monitor.clone();
@@ -389,9 +392,12 @@ fn is_secure_desktop() -> bool {
             Ok(handle) => DesktopHandle(handle),
             Err(_) => return true, // couldn’t query ⇒ assume we’re secure to be conservative
         };
+
         let mut bytes = 0_u32;
+
         let result =
             GetUserObjectInformationW(HANDLE(desktop.0.0), UOI_NAME, None, 0, Some(&mut bytes));
+
         if result.is_err() && GetLastError() != ERROR_INSUFFICIENT_BUFFER {
             return true; // genuine failure
         }
@@ -429,6 +435,40 @@ fn is_secure_desktop() -> bool {
     }
 }
 
+/// Checks if a `WorkerW` window exists between two windows in the Z-order.
+///
+/// This function traverses the Z-order upward from a target window (typically the
+/// engine window) and checks if a `WorkerW` window is present before reaching
+/// the `SHELLDLL_DefView` (desktop icons) window.
+///
+/// # Parameters
+/// - `shell_def_view`: The handle to the `SHELLDLL_DefView` window (desktop icons).
+/// - `target`: The handle to the target window to start checking from (typically the engine window).
+///
+/// # Returns
+/// Returns `true` if a `WorkerW` window is found between the target and `SHELLDLL_DefView`,
+/// `false` otherwise.
+///
+/// # How It Works
+/// 1. Starts from the `target` window and walks up the Z-order using `GetWindow` with `GW_HWNDPREV`.
+/// 2. Checks each window's class name.
+/// 3. If a `WorkerW` window is encountered, returns `true`.
+/// 4. If `SHELLDLL_DefView` is reached without finding a `WorkerW`, returns `false`.
+///
+/// # Why This Is Needed
+/// On Windows, the system may dynamically replace `WorkerW` windows between SHELLDLL_DefView ans the engine
+/// on events like changing wallpapers or switching desktops.
+/// Detecting this allows the engine to reparent itself correctly to maintain proper layering.
+///
+///
+/// # Example
+/// ```
+/// let has_workerw = has_workerw_between(shell_def_view, engine_hwnd);
+/// if has_workerw {
+///     // A WorkerW exists between the engine and desktop icons,
+///     // so the engine needs to be reparented.
+/// }
+/// ```
 pub fn has_workerw_between(shell_def_view: isize, target: isize) -> bool {
     let shell_def_view = HWND(shell_def_view as _);
     let target = HWND(target as _);
@@ -445,10 +485,10 @@ pub fn has_workerw_between(shell_def_view: isize, target: isize) -> bool {
                 return false;
             }
 
-            let class_name = class_name(previous);
-            println!("{}", class_name);
+            let (class_name, _) = class_and_title(previous);
+
+            // A WokrerW found, we need to reparent the engine to it.
             if class_name == "WorkerW" {
-                println!("baaa");
                 return true;
             }
 
@@ -457,8 +497,24 @@ pub fn has_workerw_between(shell_def_view: isize, target: isize) -> bool {
     }
 }
 
-pub fn class_name(hwnd: HWND) -> String {
-    let mut buffer = [0_u16; 256];
-    let len = unsafe { GetClassNameW(hwnd, &mut buffer) } as usize;
-    String::from_utf16_lossy(&buffer[..len])
+/// Retrieves the class name and window title for a given window handle.
+///
+/// # Arguments
+/// * `hwnd` - Handle to the target window
+///
+/// # Returns
+/// A tuple containing (class_name, window_title) as Strings.
+/// Both strings are lossily decoded from UTF-16; invalid sequences are replaced with U+FFFD.
+pub fn class_and_title(hwnd: HWND) -> (String, String) {
+    let mut buffer = [0_u16; 512];
+
+    // Get class name
+    let class_len = unsafe { GetClassNameW(hwnd, &mut buffer) } as usize;
+    let class_name = String::from_utf16_lossy(&buffer[..class_len]);
+
+    // Get window title
+    let title_len = unsafe { GetWindowTextW(hwnd, &mut buffer) } as usize;
+    let title = String::from_utf16_lossy(&buffer[..title_len]);
+
+    (class_name, title)
 }
