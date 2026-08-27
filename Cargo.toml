@@ -2,6 +2,15 @@
 name = "wallopino"
 version = "0.1.0"
 edition = "2024"
+authors = ["amir.frjn.84@gmail.com"]
+description = "A Rust library for attaching windows behind the Windows desktop icons."
+license = "MIT"
+repository = "https://github.com/amir-frjn/wallopino"
+readme = "README.md"
+keywords = ["windows", "wallpaper", "desktop", "winapi", "webview"]
+categories = ["os::windows-apis"]
+homepage = "https://github.com/amir-frjn/wallopino"
+documentation = "https://docs.rs/wallopino"
 
 
 [target.'cfg(windows)'.dependencies]
