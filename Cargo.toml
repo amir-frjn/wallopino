@@ -25,11 +25,5 @@ windows = { version = "0.61", features = [
 wry = "0.53"
 tao = "0.34"
 macroquad = "0.4"
-miniquad = "0.4"
 
-[dependencies]
-chrono = "0.4.45"
 
-[profile.dev]
-codegen-units = 256
-debug = 0
