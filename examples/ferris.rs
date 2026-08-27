@@ -1,4 +1,11 @@
-use lumin_wallpaper_rs::{AttachWindow, EventForwarder};
+/// Ai generated the whole example
+
+/// This sample creates a classic win32 windows using macroquad and uses Wallopino (to attach
+/// the window to background and send mouse events to it)
+// See line 184 to 192 as a sample of Wallopino
+use std::error::Error;
+use std::time::Duration;
+
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -164,23 +171,23 @@ fn draw_ferris(pos: Vec2, look_dir: Vec2, time: f32, moving: bool) {
 }
 
 #[macroquad::main(window_conf)]
-async fn main() {
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut crab_pos = Vec2::new(screen_width() / 2.0, screen_height() / 2.0);
     let mut target = crab_pos;
     let mut flash = 0.0;
     let mut flash_pos = Vec2::new(0.0, 0.0);
     let hwnd = get_hwnd().unwrap();
 
-    let click_forwarder = EventForwarder::new(hwnd.0 as _, None, true, false);
-    click_forwarder.unwrap().forward_events();
-    // unsafe {
-    //     let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    // Create a mouse forwarder object
+    let click_forwarder = wallopino::EventForwarder::new(hwnd.0 as _, None, true, false)?;
+    // Start forwarding events
+    click_forwarder.forward_events()?;
 
-    //     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | MA_NOACTIVATE as isize);
-    // }
-    let a = AttachWindow::auto_attach(hwnd.0 as _, true);
-    a.unwrap()
-        .start_watcher(std::time::Duration::from_millis(100));
+    // Create attacher object (static_edge_mode is enabled becuase in some tests on different devices
+    // it will detach from desktop)
+    let mut attacher = wallopino::AttachWindow::auto_attach(hwnd.0 as _, true)?;
+    attacher.start_watcher(Duration::from_millis(100))?;
+
     loop {
         let dt = get_frame_time();
         let time = get_time();

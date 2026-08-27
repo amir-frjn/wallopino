@@ -1,5 +1,5 @@
 // This piece of code is inspired by LuminWallpaper library: https://github.com/jensroth-git/LuminWallpaper
-// AI is used to generate documentation and comments for the code
+// AI is used to generate documentation and comments for the code.
 
 use windows::{
     Win32::{
@@ -517,4 +517,21 @@ pub fn class_and_title(hwnd: HWND) -> (String, String) {
     let title = String::from_utf16_lossy(&buffer[..title_len]);
 
     (class_name, title)
+}
+
+/// Converts an integer window handle into a Windows [`HWND`].
+///
+/// This helper centralizes the conversion from the internally stored `isize`
+/// representation to the Windows API handle type.
+///
+/// # Arguments
+///
+/// * `hwnd` - Integer representation of a Windows window handle.
+///
+/// # Returns
+///
+/// Returns the corresponding [`HWND`].
+#[inline]
+pub fn create_hwnd(hwnd: isize) -> HWND {
+    HWND(hwnd as _)
 }

@@ -1,3 +1,6 @@
+// Some parts of module is inspired by LuminWallpaper library: https://github.com/jensroth-git/LuminWallpaper
+// AI is used to generate documentation for the code.
+
 use std::{cell::RefCell, sync::mpsc::Sender};
 
 use windows::{
@@ -14,9 +17,10 @@ use windows::{
     core::{BOOL, w},
 };
 
-use crate::{
-    Events, class_and_title, is_invisible_win10_background_app_window,
-    platform::windows::core::{AttachWindow, FullscreenOcclusionData, MonitorInfo},
+use crate::platform::windows::{
+    core::{AttachWindow, FullscreenOcclusionData, MonitorInfo},
+    functions::{class_and_title, is_invisible_win10_background_app_window},
+    mouse::Events,
 };
 
 /// Enumerates visible top-level windows and records the portions that overlap

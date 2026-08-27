@@ -125,9 +125,9 @@ use windows::{
     core::{Error as WinErr, w},
 };
 
-use crate::{
-    has_workerw_between,
-    platform::windows::procs::{enum_windows_proc, monitor_enum_proc},
+use crate::platform::windows::{
+    functions::has_workerw_between,
+    procs::{enum_windows_proc, monitor_enum_proc},
 };
 
 // To avoid using static global variables we use this structure to store them

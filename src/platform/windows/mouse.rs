@@ -37,7 +37,7 @@
 //! # Usage
 //!
 //! ```no_run
-//! use lumin_wallpaper_rs::EventForwarder;
+//! use wallopino::EventForwarder;
 //!
 //! // Create a forwarder that captures mouse events only
 //! let forwarder = EventForwarder::new(
@@ -103,9 +103,9 @@ use windows::{
     core::Error as WinErr,
 };
 
-use crate::{
-    class_and_title,
-    platform::windows::procs::{EVENT_TX, keyboard_hook, mouse_hook},
+use crate::platform::windows::{
+    functions::{class_and_title, create_hwnd},
+    procs::{EVENT_TX, keyboard_hook, mouse_hook},
 };
 
 /// Input events that can be captured and forwarded to a target window.
@@ -135,7 +135,7 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// # use lumin_wallpaper_rs::Events;
+/// # use wallopino::Events;
 ///
 /// let event = Events::LeftDown { x: 100, y: 200 };
 /// println!("{event:?}");
@@ -294,23 +294,6 @@ impl ForwardingController {
             .join()
             .map_err(|_| WinErr::empty())??;
         Ok(())
-    }
-}
-
-impl Drop for ForwardingController {
-    /// Signals the forwarding session to terminate when the controller is dropped.
-    ///
-    /// Dropping the controller does not wait for the worker threads to terminate.
-    /// Instead, it sets the exit flag for the forwarding thread and sends
-    /// `WM_QUIT` to the hook thread so that it can leave its message loop and
-    /// remove the installed hooks.
-    fn drop(&mut self) {
-        self.exit_flag.store(true, Ordering::Release);
-
-        unsafe {
-            // Send quit message to hook_thread
-            let _ = PostThreadMessageW(self.hook_thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
-        }
     }
 }
 
@@ -832,21 +815,4 @@ fn dfs(hwnd: HWND, target_name: &str) -> Option<HWND> {
         }
     }
     None
-}
-
-/// Converts an integer window handle into a Windows [`HWND`].
-///
-/// This helper centralizes the conversion from the internally stored `isize`
-/// representation to the Windows API handle type.
-///
-/// # Arguments
-///
-/// * `hwnd` - Integer representation of a Windows window handle.
-///
-/// # Returns
-///
-/// Returns the corresponding [`HWND`].
-#[inline]
-fn create_hwnd(hwnd: isize) -> HWND {
-    HWND(hwnd as _)
 }

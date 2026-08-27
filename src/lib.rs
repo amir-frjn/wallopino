@@ -18,7 +18,7 @@
 //! # use windows::Win32::Foundation::HWND;
 //! # use windows::core::Error;
 //! # fn example(hwnd: HWND) -> Result<(), Error> {
-//! use lumin_wallpaper_rs::platform::windows::WindowsPlatform;
+//! use wallopino::windows::WindowsPlatform;
 //!
 //! let mut platform = WindowsPlatform::auto_attach(hwnd)?;
 //!
@@ -40,11 +40,11 @@
 //! # Safety
 //! This crate contains `unsafe` code for Windows API calls. Callers must ensure
 //! valid handles and appropriate permissions.
-#[cfg(target_os = "windows")]
-mod platform;
 
+mod platform;
 #[cfg(target_os = "windows")]
-pub use platform::windows::core::{AttachWindow, MonitorInfo, Vector2Platform};
-#[cfg(target_os = "windows")]
-pub use platform::windows::functions::*;
-pub use platform::windows::mouse::*;
+pub use crate::platform::windows::{
+    core::AttachWindow,
+    functions,
+    mouse::{EventForwarder, Events, ForwardingController},
+};

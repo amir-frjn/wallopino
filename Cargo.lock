@@ -1250,18 +1250,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "lumin_wallpaper_rs"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "macroquad",
- "miniquad",
- "tao",
- "windows",
- "wry",
-]
-
-[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2490,6 +2478,18 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "wallopino"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "macroquad",
+ "miniquad",
+ "tao",
+ "windows",
+ "wry",
 ]
 
 [[package]]
