@@ -20,7 +20,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **Native Macroquad rendering with desktop attachment and interactive mouse input.**
 
-![Ferris Demo](assets/Ferris%20.gif)
+![Ferris Demo](assets/Ferris.gif)
 
 ---
 
