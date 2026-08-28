@@ -20,7 +20,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **Native Macroquad rendering with desktop attachment and interactive mouse input.**
 
-![Ferris Demo](assets/Ferris.gif)
+![Ferris Demo](https://github.com/amir-frjn/wallopino/blob/main/assets/Ferris.gif)
 
 ---
 
@@ -28,7 +28,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **Interactive WebView content built with Wry/Tao, attached to the desktop with forwarded mouse input.**
 
-![Keyboard Demo](assets/Keyboard.gif)
+![Keyboard Demo](https://github.com/amir-frjn/wallopino/blob/main/assets/Keyboard.gif)
 
 ---
 
@@ -36,7 +36,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **A large animated WebView/Three.js-style scene running directly as an interactive desktop background.**
 
-![Neon Village Demo](assets/Neonvillage.gif)
+![Neon Village Demo](https://github.com/amir-frjn/wallopino/blob/main/assets/Neonvillage.gif)
 
 ---
 
@@ -44,7 +44,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **An animated WebView experience attached to the Windows desktop.**
 
-![Strings Demo](assets/Strings.gif)
+![Strings Demo](https://github.com/amir-frjn/wallopino/blob/main/assets/Strings.gif)
 
 ---
 
@@ -52,7 +52,7 @@ See Wallopino in action. Each example below is a normal application window trans
 
 **A WebView-based animated black-hole scene running behind the desktop icons.**
 
-![Wormhole Demo](assets/Wormhole.gif)
+![Wormhole Demo](https://github.com/amir-frjn/wallopino/blob/main/assets/Wormhole.gif)
 
 
 ---
