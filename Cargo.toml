@@ -1,6 +1,7 @@
+
 [package]
 name = "wallopino"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["amir.frjn.84@gmail.com"]
 description = "A Rust library for attaching windows behind the Windows desktop icons."
@@ -11,6 +12,7 @@ keywords = ["windows", "wallpaper", "desktop", "winapi", "webview"]
 categories = ["os::windows-apis"]
 homepage = "https://github.com/amir-frjn/wallopino"
 documentation = "https://docs.rs/wallopino"
+
 exclude = [
     "Cargo.lock",
     "Cargo.toml.orig",
@@ -31,8 +33,6 @@ windows = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_HiDpi",
     "Win32_System_LibraryLoader",
-    "Win32_Graphics_Gdi"
-
 ] }
 
 [dev-dependencies]
@@ -40,4 +40,7 @@ wry = "0.53"
 tao = "0.34"
 macroquad = "0.4"
 
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
 
