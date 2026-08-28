@@ -1,7 +1,7 @@
 // AI is used to generate documentation and comments for the code.
 
 //! Windows platform implementation for wallpaper engine functionality.
-//! This piece of code is inspired by LuminWallpaper library: https://github.com/jensroth-git/LuminWallpaper
+//! This piece of code is inspired by LuminWallpaper library: <https://github.com/jensroth-git/LuminWallpaper>
 //!
 //! This module provides Windows-specific implementations to set a HWND as desktop wallpaper.
 //!
@@ -490,8 +490,8 @@ impl AttachWindow {
     ///
     /// This method performs the following steps in sequence:
     /// 1. Initializes the platform AttachWindowend via [`Self::initialize`].
-    /// 2. Retrieves the wallpaper target monitor using [`get_wallpaper_target`] with `None`.
-    /// 3. Configures the wallpaper window with the provided handle and monitor using [`configure_wallpaper_window`].
+    /// 2. Retrieves the wallpaper target monitor using [`Self::get_wallpaper_target`] with `None`.
+    /// 3. Configures the wallpaper window with the provided handle and monitor using [`Self::configure_wallpaper_window`].
     /// in other mean it does:
     ///```rust
     /// let mut window_platform = Self::initialize()?;
@@ -644,7 +644,7 @@ impl AttachWindow {
     /// to obtain the current mouse coordinates.
     ///
     /// # Returns
-    /// Returns a [`Vector2Platform`] containing the mouse coordinates `(x, y)` in desktop
+    /// Returns a `Vector2Platform` containing the mouse coordinates `(x, y)` in desktop
     /// pixel coordinates. If the cursor position cannot be retrieved, returns `(0.0, 0.0)`.
     ///
     /// # Behavior
@@ -951,7 +951,7 @@ impl AttachWindow {
     /// using `GetAsyncKeyState`.
     ///
     /// # After Calling
-    /// - Use [`is_mouse_button_pressed`] to detect edge-triggered press events.
+    /// - Use [`Self::is_mouse_button_pressed`] to detect edge-triggered press events.
     /// - Use `current_mouse_state[i]` directly for continuous hold detection.
     ///
     /// # Notes

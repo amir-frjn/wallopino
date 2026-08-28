@@ -276,6 +276,7 @@ impl ForwardingController {
     ///
     /// Once this method has been called successfully, the forwarding session cannot
     /// be resumed.
+    /// ```
     /// controller.exit()?;
     /// # Ok::<(), windows::core::Error>(())
     /// ```

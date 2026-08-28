@@ -37,7 +37,7 @@ use crate::platform::windows::{
 /// # Detection Logic
 ///
 /// The function performs the following steps:
-/// 1. **Secure Desktop Check**: Calls [`is_secure_desktop`] to detect if the current
+/// 1. **Secure Desktop Check**: Calls `is_secure_desktop` to detect if the current
 ///    desktop is a secure environment (e.g., login screen, UAC).
 /// 2. **Foreground Window Check**: If not on a secure desktop, retrieves the foreground
 ///    window and checks its owning process.
@@ -71,7 +71,6 @@ use crate::platform::windows::{
 /// ```
 ///
 /// # See Also
-/// - [`is_secure_desktop`] for detecting secure desktop environments.
 /// - `LockApp.exe` – Windows lock screen application (introduced in Windows 8).
 pub fn is_desktop_locked() -> bool {
     if is_secure_desktop() {
@@ -174,9 +173,6 @@ pub fn is_desktop_locked() -> bool {
 /// # }
 /// ```
 ///
-/// # See Also
-/// - [`compute_occlusion_fraction`] for the sampling algorithm.
-/// - [`FullscreenOcclusionData`] for the data structure used.
 pub fn is_monitor_occluded(
     monitor: &MonitorInfo,
     threshold: f64,
