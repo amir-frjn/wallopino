@@ -13,9 +13,7 @@ homepage = "https://github.com/amir-frjn/wallopino"
 documentation = "https://docs.rs/wallopino"
 exclude = [
     "Cargo.lock",
-    "Cargo.toml.orig",
-     "assets/*.gif",
-    "assets/*.GIF",
+    "Cargo.toml.orig"
 ]
 
 [target.'cfg(windows)'.dependencies]
